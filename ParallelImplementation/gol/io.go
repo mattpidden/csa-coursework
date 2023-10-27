@@ -131,7 +131,6 @@ func startIo(p Params, c ioChannels) {
 		params:   p,
 		channels: c,
 	}
-	fmt.Println("Started running startIO")
 	for {
 		select {
 		// Block and wait for requests from the distributor

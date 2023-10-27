@@ -1,7 +1,6 @@
 package gol
 
 import (
-	"fmt"
 	"strconv"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -17,9 +16,9 @@ type distributorChannels struct {
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
-	fmt.Println("Started running distributor")
 	//Send command to IO, asking to run readPgmImage function
 	c.ioCommand <- 1
+
 	//Construct filename from image height and width
 	//Send filename to IO, allowing readPgmImage function to process input of image
 	c.ioFilename <- strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
@@ -42,24 +41,21 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 	}
-	fmt.Println("Received image data in distributor")
-
 
 	//Initialize turns to 0
 	turn := 0
-
 
 	//Execute all turns of the Game of Life.
 	for t := 0; t < p.Turns; t++ {
 		golWorld = calculateNextState(p, golWorld, c, t)
 		turn++
+		//Report the completion of each turn
 		c.events <- TurnComplete{CompletedTurns: turn}
 	}
 
 	//Report the final state using FinalTurnCompleteEvent.
 	aliveCells := calculateAliveCells(p, golWorld)
 	c.events <- FinalTurnComplete{CompletedTurns: turn, Alive: aliveCells}
-
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
@@ -73,6 +69,8 @@ func distributor(p Params, c distributorChannels) {
 
 //Input: p of type Params containing data about the world
 //Input: world of type 2d byte slice containing world data
+//Input: c of type distributorChannels allowing function to report events
+//Input: turn of type int to allow reported events to contain correct turn number
 //Returns: world of type 2d byte slice containing the updated world data
 func calculateNextState(p Params, world [][]byte, c distributorChannels, turn int) [][]byte {
 	//Create future state of world
@@ -89,17 +87,17 @@ func calculateNextState(p Params, world [][]byte, c distributorChannels, turn in
 			aliveNeighbours := 0
 			for n := -1; n < 2; n++ {
 				for m := -1; m < 2; m++ {
-					// Adjusting for edge cases
+					// Adjusting for edge cases (closed domain)
 					x := (i + n + p.ImageHeight) % p.ImageHeight
 					y := (j + m + p.ImageWidth) % p.ImageWidth
 
-					if world[x][y] == byte(255) { // Checks if alive
+					if world[x][y] == byte(255) { // Checks if each neighbour cell is alive
 						aliveNeighbours++
 					}
 				}
 			}
 
-			//Adjusts in case current cell is also alive (it would have got counted in the above calculations)
+			//Adjusts in case current cell is also alive (it would have got counted in the above calculations but is not a neighbour)
 			if world[i][j] == byte(255) {
 				aliveNeighbours -= 1
 			}
@@ -115,19 +113,23 @@ func calculateNextState(p Params, world [][]byte, c distributorChannels, turn in
 				future[i][j] = byte(255)
 				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
 			} else {
-				future[i][j] = world[i][j] //no change
+				future[i][j] = world[i][j] 										//no change
 			}
 		}
 	}
 	return future
 }
 
-
+//Input: p of type Params containg data about the world
+//Input: world of type [][]byte containg the gol world data
+//Returns: slice containing elements of type util.Cell, of all alive cells
 func calculateAliveCells(p Params, world [][]byte) []util.Cell {
 
 	var aliveCells []util.Cell
+	//Loops through entire GoL world
 	for i := 0; i < p.ImageHeight; i++ {
 		for j := 0; j < p.ImageWidth; j++ {
+			//If cell is alive, create cell and append to slice
 			if world[i][j] == byte(255) {
 				newCell := util.Cell{
 					X: j,
