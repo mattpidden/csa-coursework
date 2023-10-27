@@ -1,7 +1,9 @@
 package gol
 
 import (
+	"fmt"
 	"strconv"
+	"uk.ac.bris.cs/gameoflife/util"
 )
 
 type distributorChannels struct {
@@ -15,7 +17,7 @@ type distributorChannels struct {
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
-
+	fmt.Println("Started running distributor")
 	//Send command to IO, asking to run readPgmImage function
 	c.ioCommand <- 1
 	//Construct filename from image height and width
@@ -24,31 +26,39 @@ func distributor(p Params, c distributorChannels) {
 
 	//Create a 2D slice to store the world.
 	golWorld := make([][]byte, p.ImageHeight)
-	for i := range golWorld {
-		golWorld[i] = make([]byte, p.ImageWidth)
+	for y := range golWorld {
+		golWorld[y] = make([]byte, p.ImageWidth)
 	}
 
 	//Loop through 2d slice
-	for i := 0; i < p.ImageHeight; i++ {
-		for j := 0; j < p.ImageWidth; j++ {
+	for y := 0; y < p.ImageHeight; y++ {
+		for x := 0; x < p.ImageWidth; x++ {
 			//Receive data from channel and assign to 2d slice
 			b := <- c.ioInput
-			golWorld[i][j] = b
+			golWorld[y][x] = b
+			if b == byte(255) {
+				// Make sure to send this event for all cells that are alive when the image is loaded in.
+				c.events <- CellFlipped{CompletedTurns: 0, Cell: util.Cell{X: x, Y: y}}
+			}
 		}
 	}
+	fmt.Println("Received image data in distributor")
 
 
 	//Initialize turns to 0
 	turn := 0
 
+
 	//Execute all turns of the Game of Life.
 	for t := 0; t < p.Turns; t++ {
-		turn = t
-		golWorld = calculateNextState(p, golWorld)
+		golWorld = calculateNextState(p, golWorld, c, t)
+		turn++
+		c.events <- TurnComplete{CompletedTurns: turn}
 	}
 
-	// TODO: Report the final state using FinalTurnCompleteEvent.
-	c.events <- FinalTurnComplete{CompletedTurns: turn}
+	//Report the final state using FinalTurnCompleteEvent.
+	aliveCells := calculateAliveCells(p, golWorld)
+	c.events <- FinalTurnComplete{CompletedTurns: turn, Alive: aliveCells}
 
 
 	// Make sure that the Io has finished any output before exiting.
@@ -64,7 +74,7 @@ func distributor(p Params, c distributorChannels) {
 //Input: p of type Params containing data about the world
 //Input: world of type 2d byte slice containing world data
 //Returns: world of type 2d byte slice containing the updated world data
-func calculateNextState(p Params, world [][]byte) [][]byte {
+func calculateNextState(p Params, world [][]byte, c distributorChannels, turn int) [][]byte {
 	//Create future state of world
 	future := make([][]byte, p.ImageHeight)
 	for i := range future {
@@ -97,14 +107,35 @@ func calculateNextState(p Params, world [][]byte) [][]byte {
 			//Implement rules of life
 			if (world[i][j] == byte(255)) && (aliveNeighbours < 2) { 			//cell is alive but lonely and dies
 				future[i][j] = 0
-			} else if (world[i][j] == byte(255)) && (aliveNeighbours > 3) {   //cell dies due to overpopulation
+				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
+			} else if (world[i][j] == byte(255)) && (aliveNeighbours > 3) {     //cell dies due to overpopulation
 				future[i][j] = 0
-			} else if (world[i][j] == 0) && (aliveNeighbours == 3) {    //a new cell is born
+				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
+			} else if (world[i][j] == 0) && (aliveNeighbours == 3) {    		//a new cell is born
 				future[i][j] = byte(255)
+				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
 			} else {
 				future[i][j] = world[i][j] //no change
 			}
 		}
 	}
 	return future
+}
+
+
+func calculateAliveCells(p Params, world [][]byte) []util.Cell {
+
+	var aliveCells []util.Cell
+	for i := 0; i < p.ImageHeight; i++ {
+		for j := 0; j < p.ImageWidth; j++ {
+			if world[i][j] == byte(255) {
+				newCell := util.Cell{
+					X: j,
+					Y: i,
+				}
+				aliveCells = append(aliveCells, newCell)
+			}
+		}
+	}
+	return aliveCells
 }
