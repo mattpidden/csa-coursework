@@ -1,5 +1,7 @@
 package gol
 
+import "fmt"
+
 // Params provides the details of how to run the Game of Life and which image to load.
 type Params struct {
 	Turns       int
@@ -10,18 +12,21 @@ type Params struct {
 
 // Run starts the processing of Game of Life. It should initialise channels and goroutines.
 func Run(p Params, events chan<- Event, keyPresses <-chan rune) {
+	fmt.Println("Started running gol.Run")
 
-	//	TODO: Put the missing channels in here.
-
+	//Put the missing channels in here.
 	ioCommand := make(chan ioCommand)
+	filename := make(chan string)
+	output := make(chan uint8)
+	input := make(chan uint8)
 	ioIdle := make(chan bool)
 
 	ioChannels := ioChannels{
 		command:  ioCommand,
 		idle:     ioIdle,
-		filename: nil,
-		output:   nil,
-		input:    nil,
+		filename: filename,
+		output:   output,
+		input:    input,
 	}
 	go startIo(p, ioChannels)
 
@@ -29,9 +34,9 @@ func Run(p Params, events chan<- Event, keyPresses <-chan rune) {
 		events:     events,
 		ioCommand:  ioCommand,
 		ioIdle:     ioIdle,
-		ioFilename: nil,
-		ioOutput:   nil,
-		ioInput:    nil,
+		ioFilename: filename,
+		ioOutput:   output,
+		ioInput:    input,
 	}
 	distributor(p, distributorChannels)
 }
