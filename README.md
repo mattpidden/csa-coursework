@@ -19,13 +19,13 @@
   - Starting with a single-threaded implementation that will serve as a starting point for subsequent steps
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/blob/master/content/cw_diagrams-Parallel_1.png)
   - To test Step 1 use `go test -v -run=TestGol/-1$`
-- **Step 2 - IN PROGRESS** [View Branch](https://github.com/mattpidden/csa-coursework/tree/feature/step2)
+- **Step 2 - DONE** 
   - Parallelise your Game of Life so that it uses worker threads to calculate the new state of the board. You should implement a distributor that tasks different worker threads to operate on different parts of the image in parallel.
   - We are going to follow the same method as the median filter lab task.
   - The number of worker threads you should create is specified in `gol.Params.Threads`
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/blob/master/content/cw_diagrams-Parallel_2.png)
   - To test Step 2 use `go test -v -run=TestGol`
-- **Step 3**
+- **Step 3 - IN PROGRESS**
   - Using a ticker, implement the reporting of the number of cells that are still alive every 2 seconds.
   - To report the count use the AliveCellsCount event.
   - Also send the TurnComplete event after each complete iteration. (Already implemented in Step 1)
