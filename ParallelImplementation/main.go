@@ -11,7 +11,6 @@ import (
 
 // main is the function called when starting Game of Life with 'go run .'
 func main() {
-	fmt.Println("Gol Started Running")
 	runtime.LockOSThread()
 	var params gol.Params
 
