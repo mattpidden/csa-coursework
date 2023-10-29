@@ -35,7 +35,7 @@
   - Implement logic to output the state of the board after all turns have completed as a PGM image.
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/raw/master/content/cw_diagrams-Parallel_4.png)
   - To test Step 4 use `go test -v -run=TestPgm`
-  - Also use `go test -v -run=TestPgm` to ensure all tests are passing.
+  - Also use `go test -v` to ensure all tests are passing.
 - **Step 5**
   - Implement logic to visualise the state of the game using SDL.
   - You will need to use CellFlipped and TurnComplete events to achieve this. (Already implemented in Step 1)
