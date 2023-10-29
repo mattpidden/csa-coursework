@@ -7,7 +7,7 @@
 - [Group Members](https://github.com/mattpidden/csa-coursework/tree/dev#group-members)
 
 ## **Project Introduction**
-- This is our Computer Systems A summative coursework. The coursework is worth 80% of our unit mark. 
+- This is our Computer Systems A summative coursework. The coursework is worth 80% of our unit mark, 3.33% of our total degree) 
 - It runs over 4 weeks (5 weeks including the reading week) and the deadline for submitting all your work is 30 November 13:00.
 - The project is based on the Game of Life. game resides on a 2-valued 2D matrix, i.e. a binary image, where the cells can either be ‘alive’ or ‘dead’. The game evolution is determined by its initial state and requires no further input. Every cell interacts with its eight neighbour pixels: cells that are horizontally, vertically, or diagonally adjacent.
 
