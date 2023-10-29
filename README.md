@@ -25,13 +25,13 @@
   - The number of worker threads you should create is specified in `gol.Params.Threads`
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/blob/master/content/cw_diagrams-Parallel_2.png)
   - To test Step 2 use `go test -v -run=TestGol`
-- **Step 3 - IN PROGRESS**
+- **Step 3 - DONE**
   - Using a ticker, implement the reporting of the number of cells that are still alive every 2 seconds.
   - To report the count use the AliveCellsCount event.
   - Also send the TurnComplete event after each complete iteration. (Already implemented in Step 1)
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/raw/master/content/cw_diagrams-Parallel_3.png)
   - To test Step 3 use `go test -v -run=TestAlive`
-- **Step 4**
+- **Step 4 - IN PROGRESS**
   - Implement logic to output the state of the board after all turns have completed as a PGM image.
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/raw/master/content/cw_diagrams-Parallel_4.png)
   - To test Step 4 use `go test -v -run=TestPgm`
