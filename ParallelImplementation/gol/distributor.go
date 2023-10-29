@@ -1,8 +1,8 @@
 package gol
 
 import (
-	"fmt"
 	"strconv"
+	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -46,14 +46,27 @@ func distributor(p Params, c distributorChannels) {
 	//Initialize turns to 0
 	turn := 0
 
+	//Setting up chan for 2 second updates
+	timesUp := make(chan int)
+	//Running go routine to be flagging for updates every 2 seconds
+	go timer(timesUp)
+
 	//SINGLE THREAD IMPLEMENTATION FOR WHEN THREADS = 1
 	if p.Threads == 1 {
 		//Execute all turns of the Game of Life.
 		for t := 0; t < p.Turns; t++ {
+
 			immutableData := makeImmutableMatrix(golWorld)
 
+			select {
+				case <- timesUp:
+					//Check if 2 seconds has passed - if so report alive cell count to events
+					c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, golWorld))}
+				default:
+					//If timer not up, do nothing extra
+			}
+
 			golWorld = calculateNextState(0, p.ImageHeight, 0, p.ImageWidth, immutableData, c, t, p)
-			//golWorld = calculateNextState(p, golWorld, c, t)
 			turn++
 			//Report the completion of each turn
 			c.events <- TurnComplete{CompletedTurns: turn}
@@ -75,20 +88,29 @@ func distributor(p Params, c distributorChannels) {
 
 			//Wrapping starting world in closure
 			immutableData := makeImmutableMatrix(golWorld)
+
+			select {
+				//Check if 2 seconds has passed - if so report alive cell count to events
+				case <-timesUp:
+					c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, golWorld))}
+				default:
+					//If time not up, do nothing extra
+			}
+
 			//Creating var to store new world data in
 			var newGolWorld [][]uint8
 
-			//Creating individual channel for each goroutine, and starting those goroutines
+			//Assigning each goroutine, their slice of the image, and respective channel
 			for i := 0; i < p.Threads; i++ {
 				startHeight := i * cuttingHeight
 				endHeight := (i + 1) * cuttingHeight
-				if i == p.Threads - 1 {
+				if i == p.Threads-1 {
 					endHeight = p.ImageHeight
 				}
 				go worker(startHeight, endHeight, p, immutableData, c, t, channels[i])
 			}
 
-			//Receive all filtered data back from goroutines in order the data was sent out in
+			//Receive all data back from worker goroutines and stitch image back together
 			for i := 0; i < p.Threads; i++ {
 				newGolWorld = append(newGolWorld, <-channels[i]...)
 			}
@@ -126,8 +148,16 @@ func worker(startY int, endY int, p Params, data func(y, x int) uint8, c distrib
 	newPixelData := calculateNextState(startY, endY, 0, p.ImageWidth, data, c, turns, p)
 	outputChan <- newPixelData
 }
+//Used to 2 second reporting ticker
+//Input: A channel of type int
+//No return
+func timer(timesUpChan chan int) {
+	for {
+		timesUpChan <- 1
+		time.Sleep(time.Second * 2)
 
-
+	}
+}
 
 //Input: p of type Params containing data about the world
 //Input: world of type 2d uint8 slice containing world data
@@ -190,7 +220,6 @@ func calculateNextState(startY, endY, startX, endX int, data func(y, x int) uint
 //Input: world of type [][]uint8 containing the gol world data
 //Returns: slice containing elements of type util.Cell, of all alive cells
 func calculateAliveCells(p Params, world [][]uint8) []util.Cell {
-	fmt.Println(strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(p.ImageWidth) + ": " + strconv.Itoa(len(world)) +"x" + strconv.Itoa(len(world[0])))
 	var aliveCells []util.Cell
 	//Loops through entire GoL world
 	for i := 0; i < p.ImageHeight; i++ {
@@ -206,4 +235,16 @@ func calculateAliveCells(p Params, world [][]uint8) []util.Cell {
 		}
 	}
 	return aliveCells
+}
+
+func calculateAliveCellCount(data func(y, x int) uint8, p Params) int {
+	count := 0
+	for i := 0; i < p.ImageHeight; i++ {
+		for j := 0; j < p.ImageWidth; j++ {
+			if data(i, j) == 255 {
+				count++
+			}
+		}
+	}
+	return count
 }
