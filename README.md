@@ -11,7 +11,7 @@
 - It runs over 4 weeks (5 weeks including the reading week) and the deadline for submitting all your work is 30 November 13:00.
 - The project is based on the Game of Life. game resides on a 2-valued 2D matrix, i.e. a binary image, where the cells can either be ‘alive’ or ‘dead’. The game evolution is determined by its initial state and requires no further input. Every cell interacts with its eight neighbour pixels: cells that are horizontally, vertically, or diagonally adjacent.
 
-## **Parallel Implementation** [View Branch](https://github.com/mattpidden/csa-coursework/tree/imp/parallel)
+## **Parallel Implementation - DONE**
 - In this stage, we are required to write code to evolve Game of Life using multiple worker goroutines on a single machine.
 - Your Game of Life code will interact with the user or the unit tests using the events channel.
 - [Offical GitHub page found here](https://github.com/UoB-CSA/gol-skeleton)
@@ -36,7 +36,7 @@
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/raw/master/content/cw_diagrams-Parallel_4.png)
   - To test Step 4 use `go test -v -run=TestPgm`
   - Also use `go test -v` to ensure all tests are passing.
-- **Step 5 - IN PROGRESS**
+- **Step 5 - DONE**
   - Implement logic to visualise the state of the game using SDL.
   - You will need to use CellFlipped and TurnComplete events to achieve this. (Already implemented in Step 1)
   - Also, implement the following control rules. Note that the goroutine running SDL provides you with a channel containing the relevant keypresses.
