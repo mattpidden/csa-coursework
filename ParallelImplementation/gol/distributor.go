@@ -22,7 +22,8 @@ func distributor(p Params, c distributorChannels) {
 
 	//Construct filename from image height and width
 	//Send filename to IO, allowing readPgmImage function to process input of image
-	c.ioFilename <- strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
+	filename := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
+	c.ioFilename <- filename
 
 	//Create a 2D slice to store the world.
 	golWorld := make([][]uint8, p.ImageHeight)
@@ -126,6 +127,8 @@ func distributor(p Params, c distributorChannels) {
 	//Report the final state using FinalTurnCompleteEvent.
 	aliveCells := calculateAliveCells(p, golWorld)
 	c.events <- FinalTurnComplete{CompletedTurns: turn, Alive: aliveCells}
+	//Output final state as PGM image
+	outputImage(filename + "x" + strconv.Itoa(p.Turns), turn, golWorld, p, c)
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
@@ -247,4 +250,15 @@ func calculateAliveCellCount(data func(y, x int) uint8, p Params) int {
 		}
 	}
 	return count
+}
+
+func outputImage(filename string, t int, world [][]uint8, p Params, c distributorChannels) {
+	c.ioCommand <- 0
+	c.ioFilename <- filename
+	for y := 0; y < p.ImageHeight; y++ {
+		for x := 0; x < p.ImageWidth; x++ {
+			c.ioOutput <- world[y][x]
+		}
+	}
+	c.events <- ImageOutputComplete{CompletedTurns: t, Filename: filename}
 }
