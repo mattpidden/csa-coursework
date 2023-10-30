@@ -31,12 +31,12 @@
   - Also send the TurnComplete event after each complete iteration. (Already implemented in Step 1)
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/raw/master/content/cw_diagrams-Parallel_3.png)
   - To test Step 3 use `go test -v -run=TestAlive`
-- **Step 4 - IN PROGRESS**
+- **Step 4 - DONE**
   - Implement logic to output the state of the board after all turns have completed as a PGM image.
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/raw/master/content/cw_diagrams-Parallel_4.png)
   - To test Step 4 use `go test -v -run=TestPgm`
   - Also use `go test -v` to ensure all tests are passing.
-- **Step 5**
+- **Step 5 - IN PROGRESS**
   - Implement logic to visualise the state of the game using SDL.
   - You will need to use CellFlipped and TurnComplete events to achieve this. (Already implemented in Step 1)
   - Also, implement the following control rules. Note that the goroutine running SDL provides you with a channel containing the relevant keypresses.
