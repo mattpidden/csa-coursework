@@ -8,9 +8,8 @@ type Params struct {
 	ImageHeight int
 }
 
-// Run starts the processing of Game of Life. It should initialise channels and goroutines.
+// Run starts the processing of Game of Life. It initialises channels and goroutines.
 func Run(p Params, events chan<- Event, keyPresses <-chan rune) {
-	//Put the missing channels in here.
 	ioCommand := make(chan ioCommand)
 	filename := make(chan string)
 	output := make(chan uint8)
@@ -34,5 +33,7 @@ func Run(p Params, events chan<- Event, keyPresses <-chan rune) {
 		ioOutput:   output,
 		ioInput:    input,
 	}
-	distributor(p, distributorChannels)
+	distributor(p, distributorChannels, keyPresses)
 }
+
+

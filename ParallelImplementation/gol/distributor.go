@@ -1,6 +1,7 @@
 package gol
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 	"uk.ac.bris.cs/gameoflife/util"
@@ -16,7 +17,7 @@ type distributorChannels struct {
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels) {
+func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	//Send command to IO, asking to run readPgmImage function
 	c.ioCommand <- 1
 
@@ -62,9 +63,11 @@ func distributor(p Params, c distributorChannels) {
 			select {
 				case <- timesUp:
 					//Check if 2 seconds has passed - if so report alive cell count to events
-					c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, golWorld))}
+					c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, immutableData))}
+				case key := <- keyPresses:
+					handleKeyPress(key, t, filename + "x" + strconv.Itoa(t), immutableData, p, c, keyPresses)
 				default:
-					//If timer not up, do nothing extra
+					//If timer not up, or not user input: do nothing :)
 			}
 
 			golWorld = calculateNextState(0, p.ImageHeight, 0, p.ImageWidth, immutableData, c, t, p)
@@ -93,9 +96,11 @@ func distributor(p Params, c distributorChannels) {
 			select {
 				//Check if 2 seconds has passed - if so report alive cell count to events
 				case <-timesUp:
-					c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, golWorld))}
+					c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, immutableData))}
+				case key := <- keyPresses:
+					handleKeyPress(key, t, filename + "x" + strconv.Itoa(t), immutableData, p, c, keyPresses)
 				default:
-					//If time not up, do nothing extra
+					//If time not up, or not user input: do nothing extra
 			}
 
 			//Creating var to store new world data in
@@ -124,11 +129,14 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
-	//Report the final state using FinalTurnCompleteEvent.
-	aliveCells := calculateAliveCells(p, golWorld)
-	c.events <- FinalTurnComplete{CompletedTurns: turn, Alive: aliveCells}
+	immutableData := makeImmutableMatrix(golWorld)
+
 	//Output final state as PGM image
-	outputImage(filename + "x" + strconv.Itoa(p.Turns), turn, golWorld, p, c)
+	outputImage(filename + "x" + strconv.Itoa(p.Turns), turn, immutableData, p, c)
+
+	//Report the final state using FinalTurnCompleteEvent.
+	aliveCells := calculateAliveCells(p, immutableData)
+	c.events <- FinalTurnComplete{CompletedTurns: turn, Alive: aliveCells}
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
@@ -222,13 +230,13 @@ func calculateNextState(startY, endY, startX, endX int, data func(y, x int) uint
 //Input: p of type Params containing data about the world
 //Input: world of type [][]uint8 containing the gol world data
 //Returns: slice containing elements of type util.Cell, of all alive cells
-func calculateAliveCells(p Params, world [][]uint8) []util.Cell {
+func calculateAliveCells(p Params, data func(y, x int) uint8) []util.Cell {
 	var aliveCells []util.Cell
 	//Loops through entire GoL world
 	for i := 0; i < p.ImageHeight; i++ {
 		for j := 0; j < p.ImageWidth; j++ {
 			//If cell is alive, create cell and append to slice
-			if world[i][j] == 255 {
+			if data(i, j) == 255 {
 				newCell := util.Cell{
 					X: j,
 					Y: i,
@@ -240,25 +248,52 @@ func calculateAliveCells(p Params, world [][]uint8) []util.Cell {
 	return aliveCells
 }
 
-func calculateAliveCellCount(data func(y, x int) uint8, p Params) int {
-	count := 0
-	for i := 0; i < p.ImageHeight; i++ {
-		for j := 0; j < p.ImageWidth; j++ {
-			if data(i, j) == 255 {
-				count++
-			}
-		}
-	}
-	return count
-}
-
-func outputImage(filename string, t int, world [][]uint8, p Params, c distributorChannels) {
+func outputImage(filename string, t int, data func(y, x int) uint8, p Params, c distributorChannels) {
 	c.ioCommand <- 0
 	c.ioFilename <- filename
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
-			c.ioOutput <- world[y][x]
+			c.ioOutput <- data(y, x)
 		}
 	}
 	c.events <- ImageOutputComplete{CompletedTurns: t, Filename: filename}
+}
+
+func handleKeyPress(key rune, t int, filename string, data func(y, x int) uint8, p Params, c distributorChannels, keyPresses <-chan rune) {
+	switch key {
+	case 's':
+		outputImage(filename, t, data, p, c)
+	case 'q':
+		//Output final state as PGM image
+		outputImage(filename, t, data, p, c)
+
+		//Report the final state using FinalTurnCompleteEvent.
+		aliveCells := calculateAliveCells(p, data)
+		c.events <- FinalTurnComplete{CompletedTurns: t, Alive: aliveCells}
+
+		// Make sure that the Io has finished any output before exiting.
+		c.ioCommand <- ioCheckIdle
+		<-c.ioIdle
+
+		c.events <- StateChange{t, Quitting}
+
+		// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
+		close(c.events)
+	case 'p':
+		c.events <- StateChange{
+			CompletedTurns: t,
+			NewState:       Paused,
+		}
+		unpaused := false
+		for !unpaused {
+			switch <-keyPresses {
+			case 'p':
+				unpaused = true
+				fmt.Println("Continuing...")
+			default:
+				fmt.Println("Press 'p' to resume. No other functionality available whilst paused.")
+			}
+		}
+	}
+
 }
