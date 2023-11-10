@@ -49,7 +49,7 @@
 - In this stage, we need to create an implementation that uses AWS nodes to calculate the new states of the GOL board, with communication between machines over a network.
 - Note view the offical readme for help updating a test file.
 - [Offical GitHub page found here](https://github.com/UoB-CSA/gol-skeleton)
-- **Step 1**
+- **Step 1 - In Progress**
   - Start with a working single-threaded, single machine implementation (Step 1 of parallel imp).
   - Seperate this implementation into 2 components:
     - A local controller that will handle IO and capturing keypresses from the sdl window, run on a local machine.
