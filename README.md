@@ -108,7 +108,8 @@
     - Discuss how your system might scale with the addition of other distributed components.
     - Briefly discuss your methodology for acquiring any results or measurements.
     - Identify how components of your system disappearing (e.g., broken network connections) might affect the overall system and its results.
-  
+  - **Benchmarking**
+    - To view instructions and all benchmark data view [here](https://docs.google.com/spreadsheets/d/13AwJ_6NnA4v8GKOfqPoSND0-TkccEGJa_2s0QTGeNNQ/edit?usp=sharing)
 
 ## **Branches**
   - main branch
