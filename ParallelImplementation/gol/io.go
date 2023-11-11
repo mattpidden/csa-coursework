@@ -86,12 +86,14 @@ func (io *ioState) writePgmImage() {
 	fmt.Println("File", filename, "output done!")
 }
 
+//Called when ioInput is sent along the command channel
 // readPgmImage opens a pgm file and sends its data as an array of bytes.
 func (io *ioState) readPgmImage() {
-
+	fmt.Println("readPgmImage()...")
 	// Request a filename from the distributor.
 	filename := <-io.channels.filename
 
+	//Note that the required ".pgm" file ending is added here, possible source of errors if added twice
 	data, ioError := ioutil.ReadFile("images/" + filename + ".pgm")
 	util.Check(ioError)
 
