@@ -79,11 +79,11 @@ func (io *ioState) writePgmImage() {
 			util.Check(ioError)
 		}
 	}
-
+	fmt.Println("File", filename, "output done!")
 	ioError = file.Sync()
 	util.Check(ioError)
 
-	fmt.Println("File", filename, "output done!")
+	//fmt.Println("File", filename, "output done!")
 }
 
 //Called when ioInput is sent along the command channel
