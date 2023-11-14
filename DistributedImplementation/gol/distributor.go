@@ -35,6 +35,7 @@ type GetCellsAliveResponse struct {
 }
 
 type GetCellsAliveRequest struct {
+	InitialCellsAlive int
 	ImageHeight int
 	ImageWidth int
 }
@@ -74,11 +75,6 @@ func distributor(p Params, c distributorChannels) {
 	server, _ := rpc.Dial("tcp", serveradd)
 	defer server.Close()
 
-	//Setting up chan for 2 second updates
-	timesUp := make(chan int)
-	//Running go routine to be flagging for updates every 2 seconds
-	go timer(timesUp)
-
 	//CALL SINGLE THREAD EXECUTION
 	//Create request and response
 	request := SingleThreadExecutionRequest{
@@ -97,6 +93,11 @@ func distributor(p Params, c distributorChannels) {
 		golWorldProcessed <- true
 	}()
 
+	//Setting up chan for 2 second updates
+	timesUp := make(chan int)
+	//Running go routine to be flagging for updates every 2 seconds
+	go timer(timesUp)
+
 	doneProcessing := false
 	for !doneProcessing {
 		select {
@@ -104,7 +105,7 @@ func distributor(p Params, c distributorChannels) {
 			doneProcessing = true
 		case <-timesUp:
 			//make RPC call
-			request := GetCellsAliveRequest{p.ImageHeight, p.ImageWidth}
+			request := GetCellsAliveRequest{len(calculateAliveCells(p, makeImmutableMatrix(golWorld))), p.ImageHeight, p.ImageWidth}
 			response := new(GetCellsAliveResponse)
 			server.Call("GoLOperations.GetCellsAlive", request, response)
 
