@@ -1,9 +1,9 @@
 package gol
 
 import (
-	"fmt"
 	"net/rpc"
 	"strconv"
+	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -16,17 +16,27 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
-type Response struct {
+type SingleThreadExecutionResponse struct {
 	GolWorld [][]uint8
 	Turns int
 }
 
-type Request struct {
-	GolWorld [][]uint8
+type SingleThreadExecutionRequest struct {
+	GolWorld    [][]uint8
+	Turns       int
+	ImageHeight int
+	ImageWidth  int
+	Threads     int
+}
+
+type GetCellsAliveResponse struct {
 	Turns int
+	CellsAlive int
+}
+
+type GetCellsAliveRequest struct {
 	ImageHeight int
 	ImageWidth int
-	Threads int
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
@@ -64,25 +74,51 @@ func distributor(p Params, c distributorChannels) {
 	server, _ := rpc.Dial("tcp", serveradd)
 	defer server.Close()
 
+	//Setting up chan for 2 second updates
+	timesUp := make(chan int)
+	//Running go routine to be flagging for updates every 2 seconds
+	go timer(timesUp)
+
+	//CALL SINGLE THREAD EXECUTION
 	//Create request and response
-	request := Request{
+	request := SingleThreadExecutionRequest{
 		GolWorld:    golWorld,
 		Turns:       p.Turns,
 		ImageHeight: p.ImageHeight,
-		ImageWidth:  p.ImageWidth,
+		ImageWidth: p.ImageWidth,
 		Threads:     p.Threads,
 	}
-	response := new(Response)
+	response := new(SingleThreadExecutionResponse)
 
-	//call server (blocking call)
-	server.Call("GoLOperations.SingleThreadExecution", request, response)
+	//call server (blocking call) in gorountine with channel to indicate once done
+	golWorldProcessed := make(chan bool)
+	go func() {
+		server.Call("GoLOperations.SingleThreadExecution", request, response)
+		golWorldProcessed <- true
+	}()
 
-	//Get server response
+	doneProcessing := false
+	for !doneProcessing {
+		select {
+		case <-golWorldProcessed:
+			doneProcessing = true
+		case <-timesUp:
+			//make RPC call
+			request := GetCellsAliveRequest{p.ImageHeight, p.ImageWidth}
+			response := new(GetCellsAliveResponse)
+			server.Call("GoLOperations.GetCellsAlive", request, response)
+
+			//report RPC to channel
+			c.events <- AliveCellsCount{CompletedTurns: response.Turns, CellsCount: response.CellsAlive}
+		default:
+		}
+	}
+
+
+	//Get server response once gol world done processing on server
 	newGolWorld := response.GolWorld
 	turn := response.Turns
 
-	fmt.Println(turn)
-	fmt.Println(len(newGolWorld))
 
 
 
@@ -110,6 +146,17 @@ func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 		return matrix[y][x]
 	}
 }
+
+//Go routine used to send a notification every time 2 seconds has passed
+
+func timer(timesUpChan chan int) {
+	for {
+		timesUpChan <- 1
+		time.Sleep(time.Second * 2)
+
+	}
+}
+
 
 //Input: p of type Params containing data about the world
 //Input: world of type [][]uint8 containing the gol world data

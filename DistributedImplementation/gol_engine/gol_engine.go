@@ -5,14 +5,16 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
+	"sync"
+	"uk.ac.bris.cs/gameoflife/util"
 )
 
-type Response struct {
+type SingleThreadExecutionResponse struct {
 	GolWorld [][]uint8
 	Turns int
 }
 
-type Request struct {
+type SingleThreadExecutionRequest struct {
 	GolWorld [][]uint8
 	Turns int
 	ImageHeight int
@@ -20,10 +22,38 @@ type Request struct {
 	Threads int
 }
 
+type GetCellsAliveResponse struct {
+	Turns int
+	CellsAlive int
+}
+
+type GetCellsAliveRequest struct {
+	ImageHeight int
+	ImageWidth int
+}
+
 func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 	return func(y, x int) uint8 {
 		return matrix[y][x]
 	}
+}
+
+func calculateAliveCells(imageHeight, imageWidth int, data func(y, x int) uint8) []util.Cell {
+	var aliveCells []util.Cell
+	//Loops through entire GoL world
+	for i := 0; i < imageHeight; i++ {
+		for j := 0; j < imageWidth; j++ {
+			//If cell is alive, create cell and append to slice
+			if data(i, j) == 255 {
+				newCell := util.Cell{
+					X: j,
+					Y: i,
+				}
+				aliveCells = append(aliveCells, newCell)
+			}
+		}
+	}
+	return aliveCells
 }
 
 func calculateNextState(imageHeight, imageWidth, turn, startY, endY, startX, endX int, data func(y, x int) uint8) [][]uint8 {
@@ -78,23 +108,52 @@ func calculateNextState(imageHeight, imageWidth, turn, startY, endY, startX, end
 	return future
 }
 
-func CalculateNewWorld(golWorld [][]uint8, turns , imageHeight, imageWidth, startX, startY int) [][]uint8 {
-
-	newGolWorld := golWorld
-
-	for t := 0; t < turns; t++ {
-		immutableData := makeImmutableMatrix(newGolWorld)
-		newGolWorld = calculateNextState(imageHeight, imageWidth, t, startY, imageHeight, startX, imageWidth, immutableData)
-	}
-	return newGolWorld
+type GoLOperations struct {
+	golWorld [][]uint8
+	turns int
+	lock sync.Mutex
 }
 
-type GoLOperations struct {}
+func (g *GoLOperations) updateGolWorld(newWorld [][]uint8) {
+	g.lock.Lock()
+	g.golWorld = newWorld
+	g.lock.Unlock()
+}
 
-func (g *GoLOperations) SingleThreadExecution(req Request, res *Response) (err error) {
-	fmt.Println("RPC called")
-	res.Turns = req.Turns
-	res.GolWorld = CalculateNewWorld(req.GolWorld, req.Turns, req.ImageHeight, req.ImageWidth, 0, 0)
+func (g *GoLOperations) getGolWorld() [][]uint8 {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+	return g.golWorld
+}
+
+func (g *GoLOperations) SingleThreadExecution(req SingleThreadExecutionRequest, res *SingleThreadExecutionResponse) (err error) {
+	fmt.Println("GoLOperations.SingleThreadExecution called")
+
+	newGolWorld := req.GolWorld
+
+	for t := 0; t < req.Turns; t++ {
+		g.turns = t
+		immutableData := makeImmutableMatrix(newGolWorld)
+		newGolWorld = calculateNextState(req.ImageHeight, req.ImageWidth, t, 0, req.ImageHeight, 0, req.ImageWidth, immutableData)
+		g.updateGolWorld(newGolWorld)
+	}
+
+	res.Turns = g.turns
+	res.GolWorld = newGolWorld
+	return
+}
+
+func (g *GoLOperations) GetCellsAlive(req GetCellsAliveRequest, res *GetCellsAliveResponse) (err error) {
+	/*
+	fmt.Println("GoLOperations.GetCellsAlive called")
+	GolWorld := g.getGolWorld()
+	imageHeight := req.ImageHeight
+	imageWidth := req.ImageWidth
+	immutableData := makeImmutableMatrix(GolWorld)
+
+	res.CellsAlive = len(calculateAliveCells(imageHeight, imageWidth, immutableData))
+	res.Turns = g.turns
+*/
 	return
 }
 
