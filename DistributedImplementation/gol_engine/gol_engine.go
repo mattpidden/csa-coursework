@@ -4,8 +4,20 @@ import (
 	"flag"
 	"net"
 	"net/rpc"
-	"uk.ac.bris.cs/gameoflife/stubs"
 )
+
+type Response struct {
+	GolWorld [][]uint8
+	Turns int
+}
+
+type Request struct {
+	GolWorld [][]uint8
+	Turns int
+	ImageHeight int
+	ImageWidth int
+	Threads int
+}
 
 func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 	return func(y, x int) uint8 {
@@ -77,20 +89,22 @@ func CalculateNewWorld(golWorld [][]uint8, turns , imageHeight, imageWidth, star
 
 type GoLOperations struct {}
 
-func (g *GoLOperations) SingleThreadExecution(req stubs.Request, res *stubs.Response) (err error) {
+func (g *GoLOperations) SingleThreadExecution(req Request, res *Response) (err error) {
 	res.Turns = req.Turns
 	res.GolWorld = CalculateNewWorld(req.GolWorld, req.Turns, req.ImageHeight, req.ImageWidth, 0, 0)
 	return
 }
 
 func main() {
-	pAddr := flag.String("port", "8000", "Port to listen on")
+	pAddr := flag.String("port", "8030", "Port to listen on")
 	flag.Parse()
 	//rand.Seed(time.Now().UnixNano())
 	rpc.Register(&GoLOperations{})
 
 
 	listener, _ := net.Listen("tcp", ":"+*pAddr)
+	//fmt.Println(listener)
 	defer listener.Close()
 	rpc.Accept(listener)
+
 }
