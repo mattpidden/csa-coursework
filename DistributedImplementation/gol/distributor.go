@@ -1,9 +1,9 @@
 package gol
 
 import (
+	"fmt"
 	"net/rpc"
 	"strconv"
-	"uk.ac.bris.cs/gameoflife/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -14,6 +14,19 @@ type distributorChannels struct {
 	ioFilename chan<- string
 	ioOutput   chan<- uint8
 	ioInput    <-chan uint8
+}
+
+type Response struct {
+	GolWorld [][]uint8
+	Turns int
+}
+
+type Request struct {
+	GolWorld [][]uint8
+	Turns int
+	ImageHeight int
+	ImageWidth int
+	Threads int
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
@@ -46,26 +59,31 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 	//Take input of server:port
-	serveradd := "127.0.0.1:8000"
+	//serveradd := "3.80.78.238:8030"
+	serveradd := "127.0.0.1:8030"
 	server, _ := rpc.Dial("tcp", serveradd)
 	defer server.Close()
 
 	//Create request and response
-	request := stubs.Request{
+	request := Request{
 		GolWorld:    golWorld,
 		Turns:       p.Turns,
 		ImageHeight: p.ImageHeight,
 		ImageWidth:  p.ImageWidth,
 		Threads:     p.Threads,
 	}
-	response := new(stubs.Response)
+	response := new(Response)
 
 	//call server (blocking call)
-	server.Call(stubs.SingleThreadExecution, request, response)
+	server.Call("GoLOperations.SingleThreadExecution", request, response)
 
 	//Get server response
 	newGolWorld := response.GolWorld
 	turn := response.Turns
+
+	fmt.Println(turn)
+	fmt.Println(len(newGolWorld))
+
 
 
 	// FINISHING UP
