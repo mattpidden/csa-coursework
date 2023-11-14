@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net"
 	"net/rpc"
 )
@@ -78,6 +79,7 @@ func calculateNextState(imageHeight, imageWidth, turn, startY, endY, startX, end
 }
 
 func CalculateNewWorld(golWorld [][]uint8, turns , imageHeight, imageWidth, startX, startY int) [][]uint8 {
+
 	newGolWorld := golWorld
 
 	for t := 0; t < turns; t++ {
@@ -90,6 +92,7 @@ func CalculateNewWorld(golWorld [][]uint8, turns , imageHeight, imageWidth, star
 type GoLOperations struct {}
 
 func (g *GoLOperations) SingleThreadExecution(req Request, res *Response) (err error) {
+	fmt.Println("RPC called")
 	res.Turns = req.Turns
 	res.GolWorld = CalculateNewWorld(req.GolWorld, req.Turns, req.ImageHeight, req.ImageWidth, 0, 0)
 	return
