@@ -2,6 +2,7 @@ package gol
 
 import (
 	"fmt"
+	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -79,49 +80,66 @@ func distributor(p Params, c distributorChannels) {
 	fmt.Printf("p.Turns: %v \n", p.Turns)
 	//DEBUG-INFO-END
 
+	timer := time.NewTimer(2 * time.Second)
+
 	//Execute all turns
-	for turn := 0; turn < p.Turns; turn++ {
-		fmt.Printf("Simulating turn: %v \n", turn)
+	done := make(chan bool)
+	turn := 0
+	go func() {
+		for ; turn < p.Turns; turn++ {
+			fmt.Printf("Simulating turn: %v \n", turn)
 
-		//Generate sections and send to worker go routines
-		pixel := 0
-		for i := 0; i < p.Threads-1; i++ {
-			section := Section{StartPoint: pixelToCoord(p, pixel), EndPoint: pixelToCoord(p, pixel+sectionSize)}
-			fmt.Printf("section: %v \n", section)
-			IOs[i].workChan <- section
-			pixel += sectionSize
+			//Generate sections and send to worker go routines
+			pixel := 0
+			for i := 0; i < p.Threads-1; i++ {
+				section := Section{StartPoint: pixelToCoord(p, pixel), EndPoint: pixelToCoord(p, pixel+sectionSize)}
+				fmt.Printf("section: %v \n", section)
+				IOs[i].workChan <- section
+				pixel += sectionSize
+			}
+
+			section := Section{StartPoint: pixelToCoord(p, pixel), EndPoint: pixelToCoord(p, p.ImageWidth*p.ImageHeight)}
+			//fmt.Printf("section: %v \n", section)
+			IOs[p.Threads-1].workChan <- section
+
+			//Wait for all workers to finished
+			for i := 0; i < p.Threads; i++ {
+				<-outputChannel
+			}
+			fmt.Printf("Worker finished...\n")
+
+			//Copy newWorld into world
+			for y, slice := range newWorld {
+				destination := make([]byte, len(slice))
+				copy(destination, slice) //Hard Copy
+				world[y] = destination   //Soft Copy
+			}
+			c.events <- TurnComplete{turn}
 		}
+		done <- true
+	}()
 
-		section := Section{StartPoint: pixelToCoord(p, pixel), EndPoint: pixelToCoord(p, p.ImageWidth*p.ImageHeight)}
-		fmt.Printf("section: %v \n", section)
-		IOs[p.Threads-1].workChan <- section
+	//generalLock := sync.Mutex{}
 
-		//Wait for all workers to finished
-		for i := 0; i < p.Threads; i++ {
-			<-outputChannel
+	for {
+		select {
+		case <-done:
+			//Report final state using FinalTurnComplete event
+			complete := FinalTurnComplete{CompletedTurns: p.Turns, Alive: calculateAliveCells(world)}
+			c.events <- complete
+
+			// Make sure that the Io has finished any output before exiting.
+			c.ioCommand <- ioCheckIdle
+			<-c.ioIdle
+			c.events <- StateChange{p.Turns, Quitting}
+
+			// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
+			close(c.events)
+		case <-timer.C:
+			c.events <- AliveCellsCount{CellsCount: calculateNumAliveCells(world), CompletedTurns: turn}
 		}
-		fmt.Printf("Worker finished...\n")
-
-		//Copy newWorld into world
-		for y, slice := range newWorld {
-			destination := make([]byte, len(slice))
-			copy(destination, slice) //Hard Copy
-			world[y] = destination   //Soft Copy
-		}
-
 	}
 
-	//Report final state using FinalTurnComplete event
-	complete := FinalTurnComplete{CompletedTurns: p.Turns, Alive: calculateAliveCells(world)}
-	c.events <- complete
-
-	// Make sure that the Io has finished any output before exiting.
-	c.ioCommand <- ioCheckIdle
-	<-c.ioIdle
-	c.events <- StateChange{p.Turns, Quitting}
-
-	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
-	close(c.events)
 }
 
 //WRONG NEEDS FIXING
@@ -159,7 +177,7 @@ func calculateNextState(world *[][]byte, newWorld *[][]byte, section Section) *[
 	width := len((*world)[0])
 
 	//fmt.Printf("height: %v, width: %v \n", height, width)
-	fmt.Printf("calculateNextState for section: %v \n", section)
+	//fmt.Printf("calculateNextState for section: %v \n", section)
 
 	start := section.StartPoint
 	end := section.EndPoint
@@ -259,4 +277,16 @@ func calculateAliveCells(world [][]byte) []util.Cell {
 		}
 	}
 	return cells
+}
+
+func calculateNumAliveCells(world [][]byte) int {
+	numAliveCells := 0
+	for _, slice := range world {
+		for _, val := range slice {
+			if val == byte(255) {
+				numAliveCells++
+			}
+		}
+	}
+	return numAliveCells
 }
