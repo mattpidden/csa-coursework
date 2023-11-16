@@ -27,11 +27,7 @@ type GetCellsAliveResponse struct {
 	CellsAlive int
 }
 
-type GetCellsAliveRequest struct {
-	InitialCellsAlive int
-	ImageHeight int
-	ImageWidth int
-}
+type GetCellsAliveRequest struct {}
 
 func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 	return func(y, x int) uint8 {
@@ -111,6 +107,8 @@ func calculateNextState(imageHeight, imageWidth, turn, startY, endY, startX, end
 
 type GoLOperations struct {
 	golWorld [][]uint8
+	imageHeight int
+	imageWidth int
 	turns int
 	lock sync.Mutex
 }
@@ -131,6 +129,8 @@ func (g *GoLOperations) SingleThreadExecution(req SingleThreadExecutionRequest, 
 	fmt.Println("GoLOperations.SingleThreadExecution called")
 
 	newGolWorld := req.GolWorld
+	g.imageWidth = req.ImageWidth
+	g.imageHeight = req.ImageHeight
 
 	for t := 0; t < req.Turns; t++ {
 		g.turns = t
@@ -148,8 +148,8 @@ func (g *GoLOperations) GetCellsAlive(req GetCellsAliveRequest, res *GetCellsAli
 	fmt.Println("GoLOperations.GetCellsAlive called")
 
 	GolWorld := g.getGolWorld()
-	imageHeight := req.ImageHeight
-	imageWidth := req.ImageWidth
+	imageHeight := g.imageHeight
+	imageWidth := g.imageWidth
 
 	immutableData := makeImmutableMatrix(GolWorld)
 	res.Turns = g.turns
