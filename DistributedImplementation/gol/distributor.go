@@ -1,6 +1,7 @@
 package gol
 
 import (
+	"fmt"
 	"net/rpc"
 	"strconv"
 	"time"
@@ -34,14 +35,10 @@ type GetCellsAliveResponse struct {
 	CellsAlive int
 }
 
-type GetCellsAliveRequest struct {
-	InitialCellsAlive int
-	ImageHeight int
-	ImageWidth int
-}
+type GetCellsAliveRequest struct {}
 
 // distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels) {
+func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	//Send command to IO, asking to run readPgmImage function
 	c.ioCommand <- 1
 
@@ -103,14 +100,16 @@ func distributor(p Params, c distributorChannels) {
 		select {
 		case <-golWorldProcessed:
 			doneProcessing = true
+		case key := <- keyPresses:
+			handleKeyPress(key, p, c, keyPresses)
 		case <-timesUp:
 			//make RPC call
-			request := GetCellsAliveRequest{len(calculateAliveCells(p, makeImmutableMatrix(golWorld))), p.ImageHeight, p.ImageWidth}
-			response := new(GetCellsAliveResponse)
-			server.Call("GoLOperations.GetCellsAlive", request, response)
+			aliveCellsRequest := GetCellsAliveRequest{}
+			aliveCellsResponse := new(GetCellsAliveResponse)
+			server.Call("GoLOperations.GetCellsAlive", aliveCellsRequest, aliveCellsResponse)
 
 			//report RPC to channel
-			c.events <- AliveCellsCount{CompletedTurns: response.Turns, CellsCount: response.CellsAlive}
+			c.events <- AliveCellsCount{CompletedTurns: aliveCellsResponse.Turns, CellsCount: aliveCellsResponse.CellsAlive}
 		default:
 		}
 	}
@@ -125,6 +124,10 @@ func distributor(p Params, c distributorChannels) {
 
 	// FINISHING UP
 	immutableData := makeImmutableMatrix(newGolWorld)
+
+	//Output a PGM image of the final board state
+	outputImage(filename + "x" + strconv.Itoa(p.Turns), turn, immutableData, p, c)
+
 
 	//Report the final state using FinalTurnCompleteEvent.
 	aliveCells := calculateAliveCells(p, immutableData)
@@ -152,12 +155,39 @@ func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 
 func timer(timesUpChan chan int) {
 	for {
-		timesUpChan <- 1
 		time.Sleep(time.Second * 2)
-
+		timesUpChan <- 1
 	}
 }
 
+func handleKeyPress(key rune, p Params, c distributorChannels, keyPresses <-chan rune) {
+	switch key {
+	case 's':
+		//Generate a PGM file with the current state of the board (got with a rpc call)
+	case 'q':
+		//Close the controller client program without causing an error on the gol engine server.
+		//A new local controller should be able to re-interact with the server
+
+	case 'k':
+		//All components of the distributed system should be shut down cleanly, and the system should output a PGM image of the latest data
+	case 'p':
+		//Pause the processing on the gol engine server node and have the controller print the current turn that is being processed
+		//If p is pressed again resume the processing and have the controller print "Continuing"
+		//It is not necessary for q and s to work while the execution is paused.
+
+		unpaused := false
+		for !unpaused {
+			switch <-keyPresses {
+			case 'p':
+				unpaused = true
+				fmt.Println("Continuing...")
+			default:
+				fmt.Println("Press 'p' to resume. No other functionality available whilst paused.")
+			}
+		}
+	}
+
+}
 
 //Input: p of type Params containing data about the world
 //Input: world of type [][]uint8 containing the gol world data
@@ -178,4 +208,21 @@ func calculateAliveCells(p Params, data func(y, x int) uint8) []util.Cell {
 		}
 	}
 	return aliveCells
+}
+
+//Input: filename, Name of output file string
+//Input: t, Number of turns completed as an int
+//Input: data, a closure getter function of the gol world
+//Input: p, the params of this gol world
+//Input: c, a structure of distributor channels
+//Returns: Nothing, instead sends command in events channels to output an image
+func outputImage(filename string, t int, data func(y, x int) uint8, p Params, c distributorChannels) {
+	c.ioCommand <- 0
+	c.ioFilename <- filename
+	for y := 0; y < p.ImageHeight; y++ {
+		for x := 0; x < p.ImageWidth; x++ {
+			c.ioOutput <- data(y, x)
+		}
+	}
+	c.events <- ImageOutputComplete{CompletedTurns: t, Filename: filename}
 }
