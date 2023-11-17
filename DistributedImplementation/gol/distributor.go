@@ -85,6 +85,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			}
 		}
 	}
+	c.events <- TurnComplete{CompletedTurns: 0}
 
 	//Take input of server:port
 	//serveradd := "18.233.91.29:8030"
@@ -100,7 +101,8 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		ImageHeight: p.ImageHeight,
 		ImageWidth: p.ImageWidth,
 		Threads:     p.Threads,
-		ContinuePreviousWorld: false,
+		//Change this variable to control if the local controller takes over a previous controllers processing on the remote engine
+		ContinuePreviousWorld: true,
 	}
 	response := new(SingleThreadExecutionResponse)
 
@@ -116,6 +118,9 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	//Running go routine to be flagging for updates every 2 seconds
 	go timer(timesUp)
 
+
+	latestGolWorld := golWorld
+
 	doneProcessing := false
 	for !doneProcessing {
 		select {
@@ -126,11 +131,18 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		case <-timesUp:
 			//make RPC call
 			emptyRpcRequest := EmptyRpcRequest{}
-			aliveCellsResponse := new(GetCellsAliveResponse)
-			server.Call("GoLOperations.GetCellsAlive", emptyRpcRequest, aliveCellsResponse)
 
-			//report RPC to channel
-			c.events <- AliveCellsCount{CompletedTurns: aliveCellsResponse.Turns, CellsCount: aliveCellsResponse.CellsAlive}
+			boardStateResponse := new(GetBoardStateResponse)
+			server.Call("GoLOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
+			immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
+
+			//report alive cell count to channel
+			c.events <- AliveCellsCount{CompletedTurns: boardStateResponse.Turns, CellsCount: len(calculateAliveCells(p, immutableData))}
+
+			//Visualise gol on sdl window
+			checkForCellFlips(makeImmutableMatrix(latestGolWorld), makeImmutableMatrix(boardStateResponse.GolWorld), boardStateResponse.Turns, p, c)
+			c.events <- TurnComplete{CompletedTurns: boardStateResponse.Turns}
+			latestGolWorld = boardStateResponse.GolWorld
 		default:
 		}
 	}
@@ -176,6 +188,17 @@ func timer(timesUpChan chan int) {
 	}
 }
 
+func checkForCellFlips(oldGolWorld func(y, x int) uint8, newWorld func(y, x int) uint8, turn int, p Params, c distributorChannels) {
+	for i := 0; i < p.ImageHeight; i++ {
+		for j := 0; j < p.ImageWidth; j++ {
+			//If cell values do not match, send cell flipped event
+			if oldGolWorld(i, j) != newWorld(i, j) {
+				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
+			}
+		}
+	}
+}
+
 func handleKeyPress(server *rpc.Client, key rune, p Params, c distributorChannels, keyPresses <-chan rune) {
 	switch key {
 	case 's':
@@ -210,7 +233,10 @@ func handleKeyPress(server *rpc.Client, key rune, p Params, c distributorChannel
 		engineStateRequest := EngineStateRequest{State: Pausing}
 		boardStateResponse := new(GetBoardStateResponse)
 		server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
-		fmt.Println("Paused GolEngine on turn " + strconv.Itoa(boardStateResponse.Turns))
+		c.events <- StateChange{
+			CompletedTurns: boardStateResponse.Turns,
+			NewState:       Paused,
+		}
 
 		unpaused := false
 		for !unpaused {
@@ -221,6 +247,10 @@ func handleKeyPress(server *rpc.Client, key rune, p Params, c distributorChannel
 				boardStateResponse := new(GetBoardStateResponse)
 				server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
 				fmt.Println("Continuing...")
+				c.events <- StateChange{
+					CompletedTurns: boardStateResponse.Turns,
+					NewState:       Executing,
+				}
 			default:
 				fmt.Println("No other functionality available whilst paused. Press 'p' to resume. ")
 			}
