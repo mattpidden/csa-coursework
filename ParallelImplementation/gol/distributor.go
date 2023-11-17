@@ -295,5 +295,4 @@ func handleKeyPress(key rune, t int, filename string, data func(y, x int) uint8,
 			}
 		}
 	}
-
 }

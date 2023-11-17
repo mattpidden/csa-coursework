@@ -8,6 +8,14 @@ import (
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
+
+const (
+	Running int = 0
+	Pausing int = 1
+	Quiting int = 2
+	Killing int = 3
+)
+
 type distributorChannels struct {
 	events     chan<- Event
 	ioCommand  chan<- ioCommand
@@ -28,6 +36,7 @@ type SingleThreadExecutionRequest struct {
 	ImageHeight int
 	ImageWidth  int
 	Threads     int
+	ContinuePreviousWorld bool
 }
 
 type GetCellsAliveResponse struct {
@@ -35,7 +44,18 @@ type GetCellsAliveResponse struct {
 	CellsAlive int
 }
 
-type GetCellsAliveRequest struct {}
+type GetBoardStateResponse struct {
+	GolWorld [][]uint8
+	Turns int
+}
+
+type EngineStateRequest struct {
+	State int
+}
+
+type EmptyRpcRequest struct {}
+
+type EmptyRpcResponse struct {}
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
@@ -67,7 +87,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	}
 
 	//Take input of server:port
-	//serveradd := "3.80.78.238:8030"
+	//serveradd := "18.233.91.29:8030"
 	serveradd := "127.0.0.1:8030"
 	server, _ := rpc.Dial("tcp", serveradd)
 	defer server.Close()
@@ -80,10 +100,11 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		ImageHeight: p.ImageHeight,
 		ImageWidth: p.ImageWidth,
 		Threads:     p.Threads,
+		ContinuePreviousWorld: false,
 	}
 	response := new(SingleThreadExecutionResponse)
 
-	//call server (blocking call) in gorountine with channel to indicate once done
+	//call server (blocking call) in goroutine with channel to indicate once done
 	golWorldProcessed := make(chan bool)
 	go func() {
 		server.Call("GoLOperations.SingleThreadExecution", request, response)
@@ -101,12 +122,12 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		case <-golWorldProcessed:
 			doneProcessing = true
 		case key := <- keyPresses:
-			handleKeyPress(key, p, c, keyPresses)
+			handleKeyPress(server, key, p, c, keyPresses)
 		case <-timesUp:
 			//make RPC call
-			aliveCellsRequest := GetCellsAliveRequest{}
+			emptyRpcRequest := EmptyRpcRequest{}
 			aliveCellsResponse := new(GetCellsAliveResponse)
-			server.Call("GoLOperations.GetCellsAlive", aliveCellsRequest, aliveCellsResponse)
+			server.Call("GoLOperations.GetCellsAlive", emptyRpcRequest, aliveCellsResponse)
 
 			//report RPC to channel
 			c.events <- AliveCellsCount{CompletedTurns: aliveCellsResponse.Turns, CellsCount: aliveCellsResponse.CellsAlive}
@@ -114,20 +135,15 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		}
 	}
 
-
 	//Get server response once gol world done processing on server
 	newGolWorld := response.GolWorld
 	turn := response.Turns
-
-
-
 
 	// FINISHING UP
 	immutableData := makeImmutableMatrix(newGolWorld)
 
 	//Output a PGM image of the final board state
-	outputImage(filename + "x" + strconv.Itoa(p.Turns), turn, immutableData, p, c)
-
+	outputImage(filename + "x" + strconv.Itoa(turn), turn, immutableData, p, c)
 
 	//Report the final state using FinalTurnCompleteEvent.
 	aliveCells := calculateAliveCells(p, immutableData)
@@ -136,8 +152,8 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
-
 	c.events <- StateChange{turn, Quitting}
+
 	
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
@@ -160,33 +176,56 @@ func timer(timesUpChan chan int) {
 	}
 }
 
-func handleKeyPress(key rune, p Params, c distributorChannels, keyPresses <-chan rune) {
+func handleKeyPress(server *rpc.Client, key rune, p Params, c distributorChannels, keyPresses <-chan rune) {
 	switch key {
 	case 's':
 		//Generate a PGM file with the current state of the board (got with a rpc call)
+		fmt.Println("s pressed.")
+		emptyRpcRequest := EmptyRpcRequest{}
+		boardStateResponse := new(GetBoardStateResponse)
+		server.Call("GoLOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
+		immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
+		filename := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(boardStateResponse.Turns)
+		outputImage(filename, boardStateResponse.Turns, immutableData, p, c)
 	case 'q':
+		fmt.Println("q pressed.")
 		//Close the controller client program without causing an error on the gol engine server.
 		//A new local controller should be able to re-interact with the server
-
+		engineStateRequest := EngineStateRequest{State: Quiting}
+		boardStateResponse := new(GetBoardStateResponse)
+		server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
+		fmt.Println("Local Controller Quiting")
 	case 'k':
+		fmt.Println("k pressed.")
 		//All components of the distributed system should be shut down cleanly, and the system should output a PGM image of the latest data
+		engineStateRequest := EngineStateRequest{State: Killing}
+		boardStateResponse := new(GetBoardStateResponse)
+		server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
+		fmt.Println("Killing Distributed System")
 	case 'p':
+		fmt.Println("p pressed.")
 		//Pause the processing on the gol engine server node and have the controller print the current turn that is being processed
 		//If p is pressed again resume the processing and have the controller print "Continuing"
 		//It is not necessary for q and s to work while the execution is paused.
+		engineStateRequest := EngineStateRequest{State: Pausing}
+		boardStateResponse := new(GetBoardStateResponse)
+		server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
+		fmt.Println("Paused GolEngine on turn " + strconv.Itoa(boardStateResponse.Turns))
 
 		unpaused := false
 		for !unpaused {
 			switch <-keyPresses {
 			case 'p':
 				unpaused = true
+				engineStateRequest := EngineStateRequest{State: Running}
+				boardStateResponse := new(GetBoardStateResponse)
+				server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
 				fmt.Println("Continuing...")
 			default:
-				fmt.Println("Press 'p' to resume. No other functionality available whilst paused.")
+				fmt.Println("No other functionality available whilst paused. Press 'p' to resume. ")
 			}
 		}
 	}
-
 }
 
 //Input: p of type Params containing data about the world

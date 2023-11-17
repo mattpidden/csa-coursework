@@ -9,6 +9,13 @@ import (
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
+const (
+	Running int = 0
+	Pausing int = 1
+	Quiting int = 2
+	Killing int = 3
+)
+
 type SingleThreadExecutionResponse struct {
 	GolWorld [][]uint8
 	Turns int
@@ -20,6 +27,7 @@ type SingleThreadExecutionRequest struct {
 	ImageHeight int
 	ImageWidth int
 	Threads int
+	ContinuePreviousWorld bool
 }
 
 type GetCellsAliveResponse struct {
@@ -27,7 +35,18 @@ type GetCellsAliveResponse struct {
 	CellsAlive int
 }
 
-type GetCellsAliveRequest struct {}
+type GetBoardStateResponse struct {
+	GolWorld [][]uint8
+	Turns int
+}
+
+type EngineStateRequest struct {
+	State int
+}
+
+type EmptyRpcRequest struct {}
+
+type EmptyRpcResponse struct {}
 
 func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 	return func(y, x int) uint8 {
@@ -106,11 +125,14 @@ func calculateNextState(imageHeight, imageWidth, turn, startY, endY, startX, end
 }
 
 type GoLOperations struct {
+	state int
 	golWorld [][]uint8
 	imageHeight int
 	imageWidth int
-	turns int
+	totalTurns int
+	turn int
 	lock sync.Mutex
+	killingChannel chan bool
 }
 
 func (g *GoLOperations) updateGolWorld(newWorld [][]uint8) {
@@ -127,24 +149,75 @@ func (g *GoLOperations) getGolWorld() [][]uint8 {
 
 func (g *GoLOperations) SingleThreadExecution(req SingleThreadExecutionRequest, res *SingleThreadExecutionResponse) (err error) {
 	fmt.Println("GoLOperations.SingleThreadExecution called")
-
+	totalTurns := req.Turns
+	imageWidth := req.ImageWidth
+	imageHeight := req.ImageHeight
+	firstTurn := 0
 	newGolWorld := req.GolWorld
-	g.imageWidth = req.ImageWidth
-	g.imageHeight = req.ImageHeight
 
-	for t := 0; t < req.Turns; t++ {
-		g.turns = t
+	//If a previous world was quite and the new controller would like to continue processing that world...
+	if g.state == Quiting && req.ContinuePreviousWorld {
+		//Then set all the values to that of the last saved state of previous world
+		fmt.Println("Continuing execution of previous world")
+		totalTurns = g.totalTurns
+		imageWidth = g.imageWidth
+		imageHeight = g.imageHeight
+		firstTurn = g.turn
+		newGolWorld = g.getGolWorld()
+	} else {
+		//Otherwise set some values in the structure, so that other functions can access them
+		g.totalTurns = req.Turns
+		g.imageWidth = req.ImageWidth
+		g.imageHeight = req.ImageHeight
+	}
+
+	g.state = Running
+
+	for t := firstTurn; t < totalTurns; t++ {
+		currentState := g.state
+		if currentState == Quiting {
+			fmt.Println("Local Controller Quit")
+			break
+		} else if currentState == Killing {
+			fmt.Println("Killing Distributed System")
+			break
+		} else if currentState == Pausing {
+			fmt.Println("Running Paused")
+			for g.state != Running {} //should replace this with a channel probably
+			fmt.Println("Running Resumed")
+		}
+		g.turn = t
 		immutableData := makeImmutableMatrix(newGolWorld)
-		newGolWorld = calculateNextState(req.ImageHeight, req.ImageWidth, t, 0, req.ImageHeight, 0, req.ImageWidth, immutableData)
+		newGolWorld = calculateNextState(imageHeight, imageWidth, t, 0, imageHeight, 0, imageWidth, immutableData)
 		g.updateGolWorld(newGolWorld)
 	}
 
-	res.Turns = g.turns
+	res.Turns = g.turn
 	res.GolWorld = newGolWorld
+	fmt.Println("Finished Running SingleThreadExecution ")
+
+	if g.state == Killing {
+		g.killingChannel <- true
+	}
+
 	return
 }
 
-func (g *GoLOperations) GetCellsAlive(req GetCellsAliveRequest, res *GetCellsAliveResponse) (err error) {
+func (g *GoLOperations) SetGolEngineState(req EngineStateRequest, res *GetBoardStateResponse) (err error) {
+	fmt.Println("GoLOperations.SetGolEngineState called")
+	g.state = req.State
+	res.Turns = g.turn
+	res.GolWorld = g.getGolWorld()
+	return
+}
+func (g *GoLOperations) GetBoardState(req EmptyRpcRequest, res *GetBoardStateResponse) (err error) {
+	fmt.Println("GoLOperations.GetBoardState called")
+	res.Turns = g.turn
+	res.GolWorld = g.getGolWorld()
+	return
+}
+
+func (g *GoLOperations) GetCellsAlive(req EmptyRpcRequest, res *GetCellsAliveResponse) (err error) {
 	fmt.Println("GoLOperations.GetCellsAlive called")
 
 	GolWorld := g.getGolWorld()
@@ -152,9 +225,9 @@ func (g *GoLOperations) GetCellsAlive(req GetCellsAliveRequest, res *GetCellsAli
 	imageWidth := g.imageWidth
 
 	immutableData := makeImmutableMatrix(GolWorld)
-	res.Turns = g.turns
+	res.Turns = g.turn
 	//Even though there are often cells alive at the start, the testing seems to think there is not
-	if g.turns == 0 {
+	if g.turn == 0 {
 		res.CellsAlive = 0
 	}  else {
 		res.CellsAlive = len(calculateAliveCells(imageHeight, imageWidth, immutableData))
@@ -165,13 +238,18 @@ func (g *GoLOperations) GetCellsAlive(req GetCellsAliveRequest, res *GetCellsAli
 func main() {
 	pAddr := flag.String("port", "8030", "Port to listen on")
 	flag.Parse()
-	//rand.Seed(time.Now().UnixNano())
-	rpc.Register(&GoLOperations{})
+
+	killingChannel := make(chan bool)
+	rpc.Register(&GoLOperations{killingChannel: killingChannel})
 
 
 	listener, _ := net.Listen("tcp", ":"+*pAddr)
-	//fmt.Println(listener)
 	defer listener.Close()
-	rpc.Accept(listener)
 
+	go func() {
+		rpc.Accept(listener)
+	}()
+
+	//Waits to receive anything in the killingChannel to kill the server
+	<- killingChannel
 }
