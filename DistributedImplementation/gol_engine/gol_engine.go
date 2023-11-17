@@ -174,6 +174,8 @@ func (g *GoLOperations) SingleThreadExecution(req SingleThreadExecutionRequest, 
 	g.state = Running
 
 	for t := firstTurn; t < totalTurns; t++ {
+
+		//On each iteration, check the state and act accordingly
 		currentState := g.state
 		if currentState == Quiting {
 			fmt.Println("Local Controller Quit")
@@ -183,9 +185,11 @@ func (g *GoLOperations) SingleThreadExecution(req SingleThreadExecutionRequest, 
 			break
 		} else if currentState == Pausing {
 			fmt.Println("Running Paused")
-			for g.state != Running {} //should replace this with a channel probably
+			for g.state != Running {}
 			fmt.Println("Running Resumed")
 		}
+
+		//Do the iterations computation
 		g.turn = t
 		immutableData := makeImmutableMatrix(newGolWorld)
 		newGolWorld = calculateNextState(imageHeight, imageWidth, t, 0, imageHeight, 0, imageWidth, immutableData)
@@ -196,6 +200,7 @@ func (g *GoLOperations) SingleThreadExecution(req SingleThreadExecutionRequest, 
 	res.GolWorld = newGolWorld
 	fmt.Println("Finished Running SingleThreadExecution ")
 
+	//If killing selected, let main function know to end it all
 	if g.state == Killing {
 		g.killingChannel <- true
 	}
