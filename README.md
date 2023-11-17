@@ -66,10 +66,11 @@
   - Get the local controller to output the state of the board after all turns have been completed as a PGM image.
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/blob/master/content/cw_diagrams-Distributed_3.png)
   - Test your implementation using `go test -v -run=TestPgm/-1$` on the local controller.
-- **Step 4 - In Progress**
+- **Step 4 - DONE**
   - Add more functionality to the local controller, allowing it to control the Gol Engine as follows:
     - If `s` is pressed, the controller should generate a PGM file with the current state of the board.
     - If `q` is pressed, close the controller client program without causing an error on the GoL server. A new controller should be able to take over interaction with the GoL engine. Note that you are free to define the nature of how a new controller can take over interaction. Most likely the state will be reset. If you do manage to continue with the previous world this would be considered an extension and a form of fault tolerance.
+      - We have done the extension. To decide weather to continue the last world's computation, or begin new computation, a variable in the request is used. 
     - If `k` is pressed, all components of the distributed system are shut down cleanly, and the system outputs a PGM image of the latest state.
     - If `p` is pressed, pause the processing *on the AWS node* and have the *controller* print the current turn that is being processed. If `p` is pressed again resume the processing and have the controller print `"Continuing"`. It is *not* necessary for `q` and `s` to work while the execution is paused.
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/blob/master/content/cw_diagrams-Distributed_4.png)
