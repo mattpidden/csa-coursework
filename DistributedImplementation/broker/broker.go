@@ -60,6 +60,15 @@ type BrokerOperations struct {
 
 func (g *BrokerOperations) StartGolExecution(req StartGolExecutionRequest, res *StartGolExecutionResponse) (err error) {
 	fmt.Println("BrokerOperations.StartGolExecution called")
+
+	//TODO have a list of 4 server address, connect to each one
+	//TODO run each iteration on this broker
+	//TODO split the image up into 4 sections with the extra boundaries
+	//TODO send each split to the 4 different servers
+	//TODO wait for each server to return the new strip
+	//TODO put the world back together and then repeat
+	//TODO once all iterations done, return the final gol world
+
 	//Take input of server:port
 	//serveradd := "18.233.91.29:8030"
 	serveradd := "127.0.0.1:8040"
