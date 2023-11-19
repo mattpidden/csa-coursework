@@ -1,8 +1,12 @@
 package gol
 
 import (
+	"fmt"
+	"net"
 	"net/rpc"
+	"os"
 	"strconv"
+	"sync"
 	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -18,7 +22,7 @@ type distributorChannels struct {
 
 type SingleThreadExecutionResponse struct {
 	GolWorld [][]uint8
-	Turns int
+	Turns    int
 }
 
 type SingleThreadExecutionRequest struct {
@@ -30,14 +34,56 @@ type SingleThreadExecutionRequest struct {
 }
 
 type GetCellsAliveResponse struct {
-	Turns int
+	Turns      int
 	CellsAlive int
 }
 
 type GetCellsAliveRequest struct {
 	InitialCellsAlive int
-	ImageHeight int
-	ImageWidth int
+	ImageHeight       int
+	ImageWidth        int
+}
+
+// HaloExchangeRequest HALO-EXCHANGE
+type HaloExchangeRequest struct {
+	Section [][]uint8
+	Turns   int
+}
+
+// HaloExchangeResponse HALO-EXCHANGE
+type HaloExchangeResponse struct {
+	Section [][]uint8
+}
+
+// InitialiseConnectionRequest HALO-EXCHANGE
+type InitialiseConnectionRequest struct {
+	AboveIP       string
+	BelowIP       string
+	DistributorIP string
+	WorkerID      int
+}
+
+// InitialiseConnectionResponse HALO-EXCHANGE
+type InitialiseConnectionResponse struct {
+	UpperConnection bool
+	LowerConnection bool
+}
+type CellsFlippedRequest struct {
+	CellsFlipped []util.Cell
+	WorkerID     int
+	Turn         int
+}
+type CellsFlippedResponse struct {
+}
+
+type Receiver struct {
+	CellsFlippedChan chan CellsFlippedRequest
+}
+
+func (g *Receiver) CellsFlippedMethod(req CellsFlippedRequest, res *CellsFlippedResponse) error {
+	fmt.Printf("CellsFlippedMethod(): req.Turn: %v , WorkerID: %v\n", req.Turn, req.WorkerID)
+	(*g).CellsFlippedChan <- req
+	return nil
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
@@ -60,7 +106,7 @@ func distributor(p Params, c distributorChannels) {
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
 			//Receive data from channel and assign to 2d slice
-			b := <- c.ioInput
+			b := <-c.ioInput
 			golWorld[y][x] = b
 			if b == 255 {
 				//Let the event component know which cells start alive
@@ -69,77 +115,133 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
-	//Take input of server:port
-	//serveradd := "3.80.78.238:8030"
-	serveradd := "127.0.0.1:8030"
-	server, _ := rpc.Dial("tcp", serveradd)
-	defer server.Close()
+	//VARIABLE-INIT
+	ports := make([]string, 4)
+	servers := make([]*rpc.Client, len(ports))
+	sectionHeight := p.ImageHeight / p.Threads
+	var err error
+	ports[0] = "8050"
+	ports[1] = "8060"
+	ports[2] = "8070"
+	ports[3] = "8080"
+	localHost := "127.0.0.1:"
+	distPort := "8040"
+	//
 
-	//CALL SINGLE THREAD EXECUTION
-	//Create request and response
-	request := SingleThreadExecutionRequest{
-		GolWorld:    golWorld,
-		Turns:       p.Turns,
-		ImageHeight: p.ImageHeight,
-		ImageWidth: p.ImageWidth,
-		Threads:     p.Threads,
-	}
-	response := new(SingleThreadExecutionResponse)
-
-	//call server (blocking call) in gorountine with channel to indicate once done
-	golWorldProcessed := make(chan bool)
-	go func() {
-		server.Call("GoLOperations.SingleThreadExecution", request, response)
-		golWorldProcessed <- true
-	}()
-
-	//Setting up chan for 2 second updates
-	timesUp := make(chan int)
-	//Running go routine to be flagging for updates every 2 seconds
-	go timer(timesUp)
-
-	doneProcessing := false
-	for !doneProcessing {
-		select {
-		case <-golWorldProcessed:
-			doneProcessing = true
-		case <-timesUp:
-			//make RPC call
-			request := GetCellsAliveRequest{len(calculateAliveCells(p, makeImmutableMatrix(golWorld))), p.ImageHeight, p.ImageWidth}
-			response := new(GetCellsAliveResponse)
-			server.Call("GoLOperations.GetCellsAlive", request, response)
-
-			//report RPC to channel
-			c.events <- AliveCellsCount{CompletedTurns: response.Turns, CellsCount: response.CellsAlive}
-		default:
+	//Make connection for every worker
+	for i, port := range ports {
+		servers[i], err = rpc.Dial("tcp", localHost+port)
+		if err != nil {
+			fmt.Println(err)
 		}
 	}
 
+	//SETUP DISTRIBUTOR SERVER
+	listener, _ := net.Listen("tcp", ":"+distPort)
+	receiver := Receiver{make(chan CellsFlippedRequest)}
+	rpc.Register(&receiver)
 
-	//Get server response once gol world done processing on server
-	newGolWorld := response.GolWorld
-	turn := response.Turns
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				fmt.Println(err)
+			}
+			go rpc.ServeConn(conn)
+		}
+	}()
 
+	go func() {
+		for {
+			turn := 0
+			for i := 0; i < p.Threads; i++ {
+				req := <-receiver.CellsFlippedChan
+				turn = req.Turn
+				cellsFlipped := req.CellsFlipped
+				for _, cell := range cellsFlipped {
+					cell.Y += req.WorkerID * sectionHeight
+					c.events <- CellFlipped{CompletedTurns: req.Turn, Cell: cell}
+				}
+			}
+			c.events <- TurnComplete{CompletedTurns: turn}
 
+		}
+	}()
 
+	//Send InitialiseConnection requests to all workers
+	for i, server := range servers {
+		uIndex := i - 1 //upper index
+		if uIndex == -1 {
+			uIndex += len(servers)
+		}
+		lIndex := (i + 1) % len(servers) //lower index
 
-	// FINISHING UP
-	immutableData := makeImmutableMatrix(newGolWorld)
+		request := InitialiseConnectionRequest{
+			AboveIP:       localHost + ports[uIndex],
+			BelowIP:       localHost + ports[lIndex],
+			DistributorIP: localHost + distPort,
+			WorkerID:      i,
+		}
 
-	//Report the final state using FinalTurnCompleteEvent.
-	aliveCells := calculateAliveCells(p, immutableData)
-	c.events <- FinalTurnComplete{CompletedTurns: turn, Alive: aliveCells}
+		response := new(InitialiseConnectionResponse)
 
-	// Make sure that the Io has finished any output before exiting.
-	c.ioCommand <- ioCheckIdle
-	<-c.ioIdle
+		//Blocking call
+		fmt.Println("HaloExchange.InitialiseConnection call made")
+		server.Call("HaloExchange.InitialiseConnection", request, &response)
+		fmt.Println("Rpc response received")
 
-	c.events <- StateChange{turn, Quitting}
-	
-	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
-	close(c.events)
+		if response.LowerConnection && response.UpperConnection {
+			fmt.Printf("Error occured in worker: %v when attempting to connect to above and below worker\n", i)
+			os.Exit(-1)
+		}
+	}
+
+	y := 0
+	//Split initial world into sections of equal height and send sections to workers
+	wg := sync.WaitGroup{}
+	completeSections := make([][][]uint8, p.Threads)
+	go func() {
+		for i := 0; i < len(servers); i++ {
+			section := make([][]uint8, sectionHeight)
+			copy(section, golWorld[y:y+sectionHeight]) //Shallow copy
+			y += sectionHeight
+			request := HaloExchangeRequest{Section: section, Turns: p.Turns}
+			response := new(HaloExchangeResponse)
+			wg.Add(1)
+			go func(I int, req HaloExchangeRequest, res *HaloExchangeResponse) {
+				fmt.Printf("i: %v\n", I)
+				fmt.Println("Making HaloExchange.Simulate rpc call")
+				servers[I].Call("HaloExchange.Simulate", req, res)
+				fmt.Println("HaloExchange.Simulate rpc call response received")
+				completeSections[I] = res.Section
+				wg.Done()
+			}(i, request, response)
+		}
+		wg.Wait()
+		fmt.Println("All final sections received")
+
+		completeWorld := make([][]uint8, p.ImageHeight)
+		for y := 0; y < len(completeWorld); y++ {
+			completeWorld[y] = make([]uint8, p.ImageWidth)
+		}
+		y = 0
+		for _, section := range completeSections {
+			for _, row := range section {
+				completeWorld[y] = row
+				y++
+			}
+		}
+		//Output completeWorld as pgm file
+		c.ioCommand <- ioOutput
+		c.ioFilename <- "completeWorld"
+		for _, row := range completeWorld {
+			for _, val := range row {
+				c.ioOutput <- val
+			}
+		}
+	}()
+
 }
-
 
 // makeImmutableMatrix takes an existing 2D matrix and wraps it in a getter closure.
 func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
@@ -157,7 +259,6 @@ func timer(timesUpChan chan int) {
 
 	}
 }
-
 
 //Input: p of type Params containing data about the world
 //Input: world of type [][]uint8 containing the gol world data

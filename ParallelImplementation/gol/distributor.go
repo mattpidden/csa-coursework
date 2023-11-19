@@ -36,7 +36,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
 			//Receive data from channel and assign to 2d slice
-			b := <- c.ioInput
+			b := <-c.ioInput
 			golWorld[y][x] = b
 			if b == 255 {
 				//Let the event component know which cells start alive
@@ -61,13 +61,13 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			immutableData := makeImmutableMatrix(golWorld)
 
 			select {
-				case <- timesUp:
-					//Check if 2 seconds has passed - if so report alive cell count to events
-					c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, immutableData))}
-				case key := <- keyPresses:
-					handleKeyPress(key, t, filename + "x" + strconv.Itoa(t), immutableData, p, c, keyPresses)
-				default:
-					//If timer not up, or not user input: do nothing :)
+			case <-timesUp:
+				//Check if 2 seconds has passed - if so report alive cell count to events
+				c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, immutableData))}
+			case key := <-keyPresses:
+				handleKeyPress(key, t, filename+"x"+strconv.Itoa(t), immutableData, p, c, keyPresses)
+			default:
+				//If timer not up, or not user input: do nothing :)
 			}
 
 			golWorld = calculateNextState(0, p.ImageHeight, 0, p.ImageWidth, immutableData, c, t, p)
@@ -85,7 +85,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		}
 
 		//Defining the height of image for each worker
-		cuttingHeight := p.ImageHeight/p.Threads
+		cuttingHeight := p.ImageHeight / p.Threads
 
 		//Execute all turns of the Game of Life.
 		for t := 0; t < p.Turns; t++ {
@@ -94,13 +94,13 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			immutableData := makeImmutableMatrix(golWorld)
 
 			select {
-				//Check if 2 seconds has passed - if so report alive cell count to events
-				case <-timesUp:
-					c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, immutableData))}
-				case key := <- keyPresses:
-					handleKeyPress(key, t, filename + "x" + strconv.Itoa(t), immutableData, p, c, keyPresses)
-				default:
-					//If time not up, or not user input: do nothing extra
+			//Check if 2 seconds has passed - if so report alive cell count to events
+			case <-timesUp:
+				c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, immutableData))}
+			case key := <-keyPresses:
+				handleKeyPress(key, t, filename+"x"+strconv.Itoa(t), immutableData, p, c, keyPresses)
+			default:
+				//If time not up, or not user input: do nothing extra
 			}
 
 			//Creating var to store new world data in
@@ -122,6 +122,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			}
 
 			golWorld = newGolWorld
+			turn++
 
 			turn++
 			//Report the completion of each turn
@@ -132,7 +133,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	immutableData := makeImmutableMatrix(golWorld)
 
 	//Output final state as PGM image
-	outputImage(filename + "x" + strconv.Itoa(p.Turns), turn, immutableData, p, c)
+	outputImage(filename+"x"+strconv.Itoa(p.Turns), turn, immutableData, p, c)
 
 	//Report the final state using FinalTurnCompleteEvent.
 	aliveCells := calculateAliveCells(p, immutableData)
@@ -143,7 +144,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	<-c.ioIdle
 
 	c.events <- StateChange{turn, Quitting}
-	
+
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
 }
@@ -159,6 +160,7 @@ func worker(startY int, endY int, p Params, data func(y, x int) uint8, c distrib
 	newPixelData := calculateNextState(startY, endY, 0, p.ImageWidth, data, c, turns, p)
 	outputChan <- newPixelData
 }
+
 //Used to 2 second reporting ticker
 //Input: A channel of type int
 //No return
@@ -195,7 +197,7 @@ func calculateNextState(startY, endY, startX, endX int, data func(y, x int) uint
 					x := (i + n + p.ImageHeight) % p.ImageHeight
 					y := (j + m + p.ImageWidth) % p.ImageWidth
 
-					if data(x,y) == 255 { // Checks if each neighbour cell is alive
+					if data(x, y) == 255 { // Checks if each neighbour cell is alive
 						aliveNeighbours++
 					}
 				}
@@ -207,17 +209,17 @@ func calculateNextState(startY, endY, startX, endX int, data func(y, x int) uint
 			}
 
 			//Implement rules of life
-			if (data(i, j) == 255) && (aliveNeighbours < 2) { 			//cell is alive but lonely and dies
+			if (data(i, j) == 255) && (aliveNeighbours < 2) { //cell is alive but lonely and dies
 				future[i][j] = 0
 				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
-			} else if (data(i, j) == 255) && (aliveNeighbours > 3) {     //cell dies due to overpopulation
+			} else if (data(i, j) == 255) && (aliveNeighbours > 3) { //cell dies due to overpopulation
 				future[i][j] = 0
 				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
-			} else if (data(i, j) == 0) && (aliveNeighbours == 3) {    		//a new cell is born
+			} else if (data(i, j) == 0) && (aliveNeighbours == 3) { //a new cell is born
 				future[i][j] = 255
 				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
 			} else {
-				future[i][j] = data(i, j)									//no change
+				future[i][j] = data(i, j) //no change
 			}
 		}
 	}

@@ -9,34 +9,248 @@ import (
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
-type SingleThreadExecutionResponse struct {
-	GolWorld [][]uint8
-	Turns int
+// HaloExchangeRequest HALO-EXCHANGE
+type HaloExchangeRequest struct {
+	Section [][]uint8
+	Turns   int
 }
 
-type SingleThreadExecutionRequest struct {
-	GolWorld [][]uint8
-	Turns int
-	ImageHeight int
-	ImageWidth int
-	Threads int
+// HaloExchangeResponse HALO-EXCHANGE
+type HaloExchangeResponse struct {
+	Section [][]uint8
 }
 
-type GetCellsAliveResponse struct {
-	Turns int
-	CellsAlive int
+// InitialiseConnectionRequest HALO EXCHANGE STRUCT
+type InitialiseConnectionRequest struct {
+	AboveIP       string
+	BelowIP       string
+	DistributorIP string
+	WorkerID      int
 }
 
-type GetCellsAliveRequest struct {
-	InitialCellsAlive int
-	ImageHeight int
-	ImageWidth int
+// InitialiseConnectionResponse HALO EXCHANGE STRUCT
+type InitialiseConnectionResponse struct {
+	UpperConnection bool
+	LowerConnection bool
 }
 
-func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
-	return func(y, x int) uint8 {
-		return matrix[y][x]
+// GetRowRequest HALO-EXCHANGE
+type GetRowRequest struct {
+	RowRequired string //either top or bottom
+}
+
+// GetRowResponse HALO-EXCHANGE
+type GetRowResponse struct {
+	Row []uint8
+}
+
+type CellsFlippedRequest struct {
+	CellsFlipped []util.Cell
+	WorkerID     int
+	Turn         int
+}
+type CellsFlippedResponse struct {
+}
+
+type HaloExchange struct {
+	above               *rpc.Client
+	below               *rpc.Client
+	distributor         *rpc.Client
+	aboveIP             string
+	belowIP             string
+	section             [][]uint8
+	HaloRegionsReceived bool
+	TopRowSent          bool
+	BottomRowSent       bool
+	GetRowLock          sync.Mutex
+	updateSection       sync.Mutex
+	AllowGetRow         bool
+	AllowGetRowChan     chan bool
+
+	/*allowTopHaloExchange    chan bool
+	allowBottomHaloExchange chan bool*/
+	TopSent           chan bool
+	BottomSent        chan bool
+	AllowGetRowTop    chan bool
+	AllowGetRowBottom chan bool
+
+	WorkerID int
+}
+
+func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeResponse) error {
+	fmt.Println("Simulate(): HaloExchange.Simulate")
+	(*g).section = req.Section
+	wg := sync.WaitGroup{}
+
+	//Allow GetRow() calls to complete
+	(*g).AllowGetRowChan <- true
+	(*g).AllowGetRowTop <- true
+	(*g).AllowGetRowBottom <- true
+
+	//Initialise new 2d matrix
+
+	sourceMatrix := make([][]uint8, len((*g).section)+2)
+	for y := 0; y < len(sourceMatrix); y++ {
+		sourceMatrix[y] = make([]uint8, len((*g).section[0]))
 	}
+	bottomRow := make([]uint8, len((*g).section[0]))
+	topRow := make([]uint8, len((*g).section[0]))
+
+	for turn := 0; turn < req.Turns; turn++ {
+		fmt.Printf("Simulate(): Turn: %v \n", turn)
+
+		newSection := make([][]uint8, len((*g).section))
+		for y := 0; y < len(newSection); y++ {
+			newSection[y] = make([]uint8, len((*g).section[0]))
+		}
+
+		//Request top row
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := GetRowRequest{"bottom"}
+			res := GetRowResponse{}
+			fmt.Printf("Simulate(): Requesting bottom row from 'above' worker @: %v\n", (*g).aboveIP)
+			err := (*g).above.Call("HaloExchange.GetRow", req, &res)
+			handleError(err)
+			fmt.Printf("Simulate(): received bottom row from 'above' worker @: %v\n", (*g).aboveIP)
+			topRow = res.Row
+		}()
+
+		//Request bottom row
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := GetRowRequest{"top"}
+			res := GetRowResponse{}
+			fmt.Printf("Simulate(): Requesting top row from 'below' worker @: %v\n", (*g).belowIP)
+			err := (*g).above.Call("HaloExchange.GetRow", req, &res)
+			handleError(err)
+			fmt.Printf("Simulate(): received top row from 'below' worker @: %v\n", (*g).belowIP)
+			bottomRow = res.Row
+		}()
+		wg.Wait()
+
+		//Wait for both halo rows to have been sent
+		_ = <-(*g).TopSent
+		_ = <-(*g).BottomSent
+		fmt.Println("Simulate(): Both 'halo rows' sent")
+
+		//Initialise source matrix
+		sourceMatrix[0] = topRow
+		sourceMatrix[len(sourceMatrix)-1] = bottomRow
+		for y := 1; y < len(sourceMatrix)-1; y++ {
+			//sourceMatrix[y] = (*g).section[y-1]
+			copy(sourceMatrix[y], (*g).section[y-1])
+		}
+
+		cellsFlipped := make([]util.Cell, 0)
+		source := makeImmutableMatrix(sourceMatrix)
+		calcNextState(source, &newSection, &cellsFlipped)
+		fmt.Printf("Simulate(): len(cellsFlipped): %v\n", len(cellsFlipped))
+
+		//Make RPC call to distributor containing cellsFlipped slice
+		req := CellsFlippedRequest{CellsFlipped: cellsFlipped, Turn: turn, WorkerID: (*g).WorkerID}
+		res := CellsFlippedResponse{}
+
+		(*g).distributor.Call("Receiver.CellsFlippedMethod", req, &res)
+		//END-DEBUG
+		(*g).section = newSection
+		(*g).AllowGetRowTop <- true
+		(*g).AllowGetRowBottom <- true
+
+	}
+	fmt.Println("Simulate(): SIMULATION COMPLETE")
+	(*res).Section = (*g).section
+
+	return nil
+}
+
+//ISSUE PROBABLY HERE
+//Why is the number of cells flipped so high??
+func calcNextState(source func(y, x int) uint8, newSection *[][]uint8, cellsFlipped *[]util.Cell) {
+	for Y, row := range *newSection {
+		for X, _ := range row {
+			liveNeighbours := 0
+			//fmt.Printf("X: %v, Y: %v\n", X, Y)
+			val := source(Y+1, X)
+			//Iterate over the surrounding 8 cells
+			for y := Y - 1; y < Y-1+3; y++ {
+				for x := X - 1; x < X-1+3; x++ {
+					if x == X && y == Y {
+						continue
+					}
+					//fmt.Printf("X: %v, Y: %v, x: %v, y: %v \n", X, Y, x, y)
+					sourceX := x
+					sourceY := y + 1 //(x,y) -> (x,y+1) adjustment
+					//"Wrap around" on x-axis
+					if sourceX < 0 {
+						sourceX += len(row) //+ width
+					} else if sourceX == len(row) { //==width
+						sourceX -= len(row)
+					}
+					//Check if cell is alive
+					if source(sourceY, sourceX) == 255 {
+						liveNeighbours++
+					}
+				}
+			}
+
+			(*newSection)[Y][X] = determineVal(liveNeighbours, val, cellsFlipped, Y, X)
+		}
+	}
+}
+
+func (g *HaloExchange) GetRow(req GetRowRequest, res *GetRowResponse) error {
+	fmt.Printf("GetRow(): HaloExchange.GetRow: %v\n", req.RowRequired)
+	//Imperfect solution - needs work
+	(*g).GetRowLock.Lock()
+	if !(*g).AllowGetRow {
+		//Wait on chan
+		(*g).AllowGetRow = <-(*g).AllowGetRowChan
+	}
+	(*g).GetRowLock.Unlock()
+
+	if req.RowRequired == "top" {
+		<-(*g).AllowGetRowTop
+		(*res).Row = (*g).section[0]
+		(*g).TopSent <- true
+
+	} else if req.RowRequired == "bottom" {
+		<-(*g).AllowGetRowBottom
+		(*res).Row = (*g).section[len((*g).section)-1]
+		(*g).BottomSent <- true
+	}
+
+	return nil
+}
+func (g *HaloExchange) InitialiseConnection(req InitialiseConnectionRequest, res *InitialiseConnectionResponse) error {
+	fmt.Println("InitialiseConnection(): HaloExchange.InitialiseConnection")
+	var err error
+	fmt.Printf("InitialiseConnection(): g.above connected to %v\n", req.AboveIP)
+	(*g).WorkerID = req.WorkerID
+	(*g).above, err = rpc.Dial("tcp", req.AboveIP)
+	(*g).aboveIP = req.AboveIP
+	if err != nil {
+		fmt.Println("InitialiseConnection(): Error occurred whilst attempting to connect to 'above' worker ")
+		fmt.Println(err)
+		res.UpperConnection = false
+	}
+	(*g).below, err = rpc.Dial("tcp", req.BelowIP)
+	(*g).belowIP = req.BelowIP
+	fmt.Printf("InitialiseConnection(): g.below connected to %v\n", req.BelowIP)
+	if err != nil {
+		fmt.Println("InitialiseConnection(): Error occurred whilst attempting to connect to 'above' worker ")
+		fmt.Println(err)
+		res.UpperConnection = false
+	}
+
+	(*g).distributor, err = rpc.Dial("tcp", req.DistributorIP)
+	if err != nil {
+		fmt.Println("InitialiseConnection(): Error occurred whilst attempting to connect to distributor ")
+		fmt.Println(err)
+	}
+	return err
 }
 
 func calculateAliveCells(imageHeight, imageWidth int, data func(y, x int) uint8) []util.Cell {
@@ -57,121 +271,66 @@ func calculateAliveCells(imageHeight, imageWidth int, data func(y, x int) uint8)
 	return aliveCells
 }
 
-func calculateNextState(imageHeight, imageWidth, turn, startY, endY, startX, endX int, data func(y, x int) uint8) [][]uint8 {
-
-	//Create future state of world
-	future := make([][]uint8, imageHeight)
-	for i := range future {
-		future[i] = make([]uint8, imageWidth)
-	}
-
-	//Loop through every cell in given range
-	for i := startY; i < endY; i++ {
-		for j := 0; j < imageWidth; j++ {
-
-			//find number of neighbours alive
-			aliveNeighbours := 0
-			for n := -1; n < 2; n++ {
-				for m := -1; m < 2; m++ {
-					// Adjusting for edge cases (closed domain)
-					x := (i + n + imageHeight) % imageHeight
-					y := (j + m + imageWidth) % imageWidth
-
-					if data(x,y) == 255 { // Checks if each neighbour cell is alive
-						aliveNeighbours++
-					}
-				}
-			}
-
-			//Adjusts in case current cell is also alive (it would have got counted in the above calculations but is not a neighbour)
-			if data(i, j) == 255 {
-				aliveNeighbours -= 1
-			}
-
-			//Implement rules of life
-			if (data(i, j) == 255) && (aliveNeighbours < 2) { 				//cell is alive but lonely and dies
-				future[i][j] = 0
-				//c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
-			} else if (data(i, j) == 255) && (aliveNeighbours > 3) {     	//cell dies due to overpopulation
-				future[i][j] = 0
-				//c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
-			} else if (data(i, j) == 0) && (aliveNeighbours == 3) {    		//a new cell is born
-				future[i][j] = 255
-				//c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
-			} else {
-				future[i][j] = data(i, j)									//no change
-			}
+func determineVal(LN int, currentVal uint8, cellsFlipped *[]util.Cell, y, x int) uint8 {
+	//LN : LiveNeighbours
+	//If cell is alive
+	//fmt.Printf("determineVal(): LN: %v \n", LN)
+	if currentVal == 255 {
+		if LN < 2 {
+			*cellsFlipped = append(*cellsFlipped, util.Cell{X: x, Y: y})
+			return 255 //dies by under-population
+		}
+		if LN == 2 || LN == 3 {
+			return currentVal //unaffected
+		}
+		if LN > 3 {
+			*cellsFlipped = append(*cellsFlipped, util.Cell{X: x, Y: y})
+			return 0 //dies by over population
 		}
 	}
-	//trim future world
-	future = future[startY:endY]
-
-	return future
-}
-
-type GoLOperations struct {
-	golWorld [][]uint8
-	turns int
-	lock sync.Mutex
-}
-
-func (g *GoLOperations) updateGolWorld(newWorld [][]uint8) {
-	g.lock.Lock()
-	g.golWorld = newWorld
-	g.lock.Unlock()
-}
-
-func (g *GoLOperations) getGolWorld() [][]uint8 {
-	g.lock.Lock()
-	defer g.lock.Unlock()
-	return g.golWorld
-}
-
-func (g *GoLOperations) SingleThreadExecution(req SingleThreadExecutionRequest, res *SingleThreadExecutionResponse) (err error) {
-	fmt.Println("GoLOperations.SingleThreadExecution called")
-
-	newGolWorld := req.GolWorld
-
-	for t := 0; t < req.Turns; t++ {
-		g.turns = t
-		immutableData := makeImmutableMatrix(newGolWorld)
-		newGolWorld = calculateNextState(req.ImageHeight, req.ImageWidth, t, 0, req.ImageHeight, 0, req.ImageWidth, immutableData)
-		g.updateGolWorld(newGolWorld)
+	//If cell is dead
+	if currentVal == 0 {
+		*cellsFlipped = append(*cellsFlipped, util.Cell{X: x, Y: y})
+		if LN == 3 {
+			return 255 //lives
+		}
 	}
-
-	res.Turns = g.turns
-	res.GolWorld = newGolWorld
-	return
+	return currentVal
 }
 
-func (g *GoLOperations) GetCellsAlive(req GetCellsAliveRequest, res *GetCellsAliveResponse) (err error) {
-	fmt.Println("GoLOperations.GetCellsAlive called")
-
-	GolWorld := g.getGolWorld()
-	imageHeight := req.ImageHeight
-	imageWidth := req.ImageWidth
-
-	immutableData := makeImmutableMatrix(GolWorld)
-	res.Turns = g.turns
-	//Even though there are often cells alive at the start, the testing seems to think there is not
-	if g.turns == 0 {
-		res.CellsAlive = 0
-	}  else {
-		res.CellsAlive = len(calculateAliveCells(imageHeight, imageWidth, immutableData))
+func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
+	return func(y, x int) uint8 {
+		return matrix[y][x]
 	}
-	return
+}
+
+func handleError(err error) {
+	if err != nil {
+		fmt.Println(err)
+	}
 }
 
 func main() {
 	pAddr := flag.String("port", "8030", "Port to listen on")
 	flag.Parse()
-	//rand.Seed(time.Now().UnixNano())
-	rpc.Register(&GoLOperations{})
+	fmt.Printf("Main(): Listening on port %v", *pAddr)
 
+	g := HaloExchange{
+		TopSent:           make(chan bool, 1),
+		BottomSent:        make(chan bool, 1),
+		AllowGetRowChan:   make(chan bool, 1),
+		AllowGetRowTop:    make(chan bool, 1),
+		AllowGetRowBottom: make(chan bool, 1),
+	}
+	rpc.Register(&g)
 
 	listener, _ := net.Listen("tcp", ":"+*pAddr)
-	//fmt.Println(listener)
 	defer listener.Close()
-	rpc.Accept(listener)
-
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			fmt.Println(err)
+		}
+		go rpc.ServeConn(conn)
+	}
 }
