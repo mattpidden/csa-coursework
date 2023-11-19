@@ -169,6 +169,8 @@ func (g *GoLOperations) SingleThreadExecution(req SingleThreadExecutionRequest, 
 		g.totalTurns = req.Turns
 		g.imageWidth = req.ImageWidth
 		g.imageHeight = req.ImageHeight
+		g.turn = 0
+		g.updateGolWorld(req.GolWorld)
 	}
 
 	g.state = Running
@@ -197,7 +199,7 @@ func (g *GoLOperations) SingleThreadExecution(req SingleThreadExecutionRequest, 
 	}
 
 	res.Turns = g.turn
-	res.GolWorld = newGolWorld
+	res.GolWorld = g.getGolWorld()
 	fmt.Println("Finished Running SingleThreadExecution ")
 
 	//If killing selected, let main function know to end it all
