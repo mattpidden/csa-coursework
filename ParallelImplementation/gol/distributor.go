@@ -290,6 +290,10 @@ func handleKeyPress(key rune, t int, filename string, data func(y, x int) uint8,
 			case 'p':
 				unpaused = true
 				fmt.Println("Continuing...")
+				c.events <- StateChange{
+					CompletedTurns: t,
+					NewState:       Executing,
+				}
 			default:
 				fmt.Println("Press 'p' to resume. No other functionality available whilst paused.")
 			}
