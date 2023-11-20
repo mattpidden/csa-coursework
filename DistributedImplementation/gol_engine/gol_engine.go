@@ -44,6 +44,18 @@ type EngineStateRequest struct {
 	State int
 }
 
+type StartEngineRequest struct {
+	GolWorld [][]uint8
+	ImageHeight int
+	ImageWidth int
+	StartHeight int
+	EndHeight int
+}
+
+type StartEngineResponse struct {
+	GolWorld [][]uint8
+}
+
 type EmptyRpcRequest struct {}
 
 type EmptyRpcResponse struct {}
@@ -72,7 +84,7 @@ func calculateAliveCells(imageHeight, imageWidth int, data func(y, x int) uint8)
 	return aliveCells
 }
 
-func calculateNextState(imageHeight, imageWidth, turn, startY, endY, startX, endX int, data func(y, x int) uint8) [][]uint8 {
+func calculateNextState(imageHeight, imageWidth, startY, endY int, data func(y, x int) uint8) [][]uint8 {
 
 	//Create future state of world
 	future := make([][]uint8, imageHeight)
@@ -147,6 +159,12 @@ func (g *GoLOperations) getGolWorld() [][]uint8 {
 	return g.golWorld
 }
 
+func (g *GoLOperations) RunEngine(req StartEngineRequest, res *StartEngineResponse) (err error) {
+	//TODO processing only the strip of the image, then return that strip in the response
+	newStripData := calculateNextState(req.ImageHeight, req.ImageWidth, req.StartHeight, req.EndHeight, makeImmutableMatrix(req.GolWorld))
+	res.GolWorld = newStripData
+	return
+}
 func (g *GoLOperations) SingleThreadExecution(req SingleThreadExecutionRequest, res *SingleThreadExecutionResponse) (err error) {
 	fmt.Println("GoLOperations.SingleThreadExecution called")
 	totalTurns := req.Turns
@@ -194,7 +212,7 @@ func (g *GoLOperations) SingleThreadExecution(req SingleThreadExecutionRequest, 
 		//Do the iterations computation
 		g.turn = t
 		immutableData := makeImmutableMatrix(newGolWorld)
-		newGolWorld = calculateNextState(imageHeight, imageWidth, t, 0, imageHeight, 0, imageWidth, immutableData)
+		newGolWorld = calculateNextState(imageHeight, imageWidth, 0, imageHeight, immutableData)
 		g.updateGolWorld(newGolWorld)
 	}
 
