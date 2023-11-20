@@ -77,7 +77,7 @@ type CellsFlippedResponse struct {
 }
 
 type Receiver struct {
-	CellsFlippedChan chan CellsFlippedRequest
+	CellsFlippedChan chan<- CellsFlippedRequest
 }
 
 func (g *Receiver) CellsFlippedMethod(req CellsFlippedRequest, res *CellsFlippedResponse) error {
@@ -86,23 +86,17 @@ func (g *Receiver) CellsFlippedMethod(req CellsFlippedRequest, res *CellsFlipped
 	return nil
 }
 
-// distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels) {
-	//Send command to IO, asking to run readPgmImage function
-	c.ioCommand <- 1
-
-	//Construct filename from image height and width
-	//Send filename to IO, allowing readPgmImage function to process input of image
+func initializeGolMatrix(p Params, c distributorChannels) [][]uint8 {
 	filename := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
+	c.ioCommand <- ioInput
 	c.ioFilename <- filename
 
-	//Create a 2D slice to store the world.
 	golWorld := make([][]uint8, p.ImageHeight)
 	for y := range golWorld {
 		golWorld[y] = make([]uint8, p.ImageWidth)
 	}
 
-	//Loop through 2d slice initializing each cell
+	//Loop through matrix retrieving initial value for each cell
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
 			//Receive data from channel and assign to 2d slice
@@ -114,59 +108,51 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 	}
+	return golWorld
+}
 
-	//VARIABLE-INIT
-	ports := make([]string, 4)
-	servers := make([]*rpc.Client, len(ports))
-	sectionHeight := p.ImageHeight / p.Threads
-	var err error
-	ports[0] = "8050"
-	ports[1] = "8060"
-	ports[2] = "8070"
-	ports[3] = "8080"
-	localHost := "127.0.0.1:"
-	distPort := "8040"
-	//
-
-	//Make connection for every worker
-	for i, port := range ports {
-		servers[i], err = rpc.Dial("tcp", localHost+port)
-		if err != nil {
-			fmt.Println(err)
-		}
-	}
-
+func startDistServer(port string, channel chan<- CellsFlippedRequest) {
 	//SETUP DISTRIBUTOR SERVER
-	listener, _ := net.Listen("tcp", ":"+distPort)
-	receiver := Receiver{make(chan CellsFlippedRequest)}
+	listener, _ := net.Listen("tcp", ":"+port)
+	receiver := Receiver{channel}
 	rpc.Register(&receiver)
 
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				fmt.Println(err)
-			}
-			go rpc.ServeConn(conn)
-		}
-	}()
+	//All connections will send their CellsFlippedRequest along the same channel
+	for {
+		conn, err := listener.Accept()
+		handleError(err)
+		go rpc.ServeConn(conn)
+	}
+}
 
-	go func() {
-		for {
-			turn := 0
-			for i := 0; i < p.Threads; i++ {
-				req := <-receiver.CellsFlippedChan
-				turn = req.Turn
-				cellsFlipped := req.CellsFlipped
-				for _, cell := range cellsFlipped {
-					cell.Y += req.WorkerID * sectionHeight
-					c.events <- CellFlipped{CompletedTurns: req.Turn, Cell: cell}
-				}
+//WILL NEED IMPROVEMENT TO WORK WITH INCONVENIENT p.threads (Assumes all sections are same height)
+func handleRequests(reqChan <-chan CellsFlippedRequest, sectionHeight int, p Params, c distributorChannels) {
+	for {
+		turn := 0
+		for i := 0; i < p.Threads; i++ {
+			req := <-reqChan
+			turn = req.Turn
+			cellsFlipped := req.CellsFlipped
+			for _, cell := range cellsFlipped {
+				cell.Y += req.WorkerID * sectionHeight
+				c.events <- CellFlipped{CompletedTurns: req.Turn, Cell: cell}
 			}
-			c.events <- TurnComplete{CompletedTurns: turn}
-
 		}
-	}()
+		c.events <- TurnComplete{CompletedTurns: turn}
+	}
+}
+
+func handleError(err error) {
+	if err != nil {
+		fmt.Println(err)
+	}
+}
+func initialiseWorkerConnections(ports []string, localHost string, distPort string, servers []*rpc.Client) {
+	var err error
+	for i, port := range ports {
+		servers[i], err = rpc.Dial("tcp", localHost+port)
+		handleError(err)
+	}
 
 	//Send InitialiseConnection requests to all workers
 	for i, server := range servers {
@@ -195,8 +181,67 @@ func distributor(p Params, c distributorChannels) {
 			os.Exit(-1)
 		}
 	}
+}
 
+func beginGol(servers []*rpc.Client, sectionHeight int, golWorld [][]uint8, p Params) {
+	fmt.Println("beginGol():")
+	wg := sync.WaitGroup{}
 	y := 0
+	completeSections := make([][][]uint8, p.Threads)
+	for i := 0; i < len(servers); i++ {
+		section := make([][]uint8, sectionHeight)
+		copy(section, golWorld[y:y+sectionHeight]) //Shallow copy
+		y += sectionHeight
+		request := HaloExchangeRequest{Section: section, Turns: p.Turns}
+		response := new(HaloExchangeResponse)
+		wg.Add(1)
+		go func(I int, req HaloExchangeRequest, res *HaloExchangeResponse) {
+			fmt.Printf("i: %v\n", I)
+			fmt.Println("Making HaloExchange.Simulate rpc call")
+			servers[I].Call("HaloExchange.Simulate", req, res)
+			fmt.Println("HaloExchange.Simulate rpc call response received")
+			completeSections[I] = res.Section
+			wg.Done()
+		}(i, request, response)
+	}
+	wg.Wait()
+	fmt.Println("All workers have finished computation")
+
+}
+
+// distributor divides the work between workers and interacts with other goroutines.
+func distributor(p Params, c distributorChannels) {
+	fmt.Println("Distributor(): ")
+	//VARIABLE-INIT
+	ports := make([]string, p.Threads)
+	servers := make([]*rpc.Client, p.Threads)
+	sectionHeight := p.ImageHeight / p.Threads
+	reqChan := make(chan CellsFlippedRequest)
+	var golWorld [][]uint8
+
+	//Configuration for running 4 workers on local system
+	distPort := "8040"
+	ports[0] = "8050"
+	ports[1] = "8060"
+	ports[2] = "8070"
+	ports[3] = "8080"
+	localHost := "127.0.0.1:"
+
+	//Start distributor server
+	golWorld = initializeGolMatrix(p, c)
+
+	go startDistServer(distPort, reqChan)
+
+	//Start go routine to handle CellsFlippedRequests
+	go handleRequests(reqChan, sectionHeight, p, c)
+
+	//Make connection for every worker
+	initialiseWorkerConnections(ports, localHost, distPort, servers)
+
+	//Begin gol computation
+	beginGol(servers, sectionHeight, golWorld, p)
+
+	/*y := 0
 	//Split initial world into sections of equal height and send sections to workers
 	wg := sync.WaitGroup{}
 	completeSections := make([][][]uint8, p.Threads)
@@ -239,7 +284,7 @@ func distributor(p Params, c distributorChannels) {
 				c.ioOutput <- val
 			}
 		}
-	}()
+	}()*/
 
 }
 
