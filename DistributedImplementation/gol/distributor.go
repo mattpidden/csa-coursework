@@ -7,9 +7,10 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
+
+var requestsChannel chan CellsFlippedRequest //YOUR DAMN TESTS LEFT ME WITH NO CHOICE OK
 
 type distributorChannels struct {
 	events     chan<- Event
@@ -111,26 +112,67 @@ func initializeGolMatrix(p Params, c distributorChannels) [][]uint8 {
 	return golWorld
 }
 
-func startDistServer(port string, channel chan<- CellsFlippedRequest) {
+func startDistServer(port string, channel chan<- CellsFlippedRequest, shutDownChan, shutDownCompleteChan chan bool) {
 	//SETUP DISTRIBUTOR SERVER
-	listener, _ := net.Listen("tcp", ":"+port)
+	fmt.Println("startDistServer():")
+	listener, err := net.Listen("tcp", ":"+port)
+	handleError(err)
+
 	receiver := Receiver{channel}
-	rpc.Register(&receiver)
+	err = rpc.Register(&receiver)
+	handleError(err)
+
+	connChan := make(chan net.Conn)
+	connections := make([]net.Conn, 0)
 
 	//All connections will send their CellsFlippedRequest along the same channel
+	go func(connChan chan net.Conn) {
+		for {
+			conn, err := listener.Accept()
+			handleError(err)
+			if err != nil {
+				connChan <- conn
+			}
+
+		}
+	}(connChan)
+
 	for {
-		conn, err := listener.Accept()
-		handleError(err)
-		go rpc.ServeConn(conn)
+		select {
+		case <-shutDownChan:
+			//Shut down listener
+			err := listener.Close()
+			handleError(err)
+			//Close all net.Conn connections
+			for _, conn := range connections {
+				err = conn.Close()
+				handleError(err)
+			}
+			fmt.Println("startDistServer(): DistServer shutting down")
+			shutDownCompleteChan <- true
+
+			return
+		case conn := <-connChan:
+			connections = append(connections, conn)
+			go rpc.ServeConn(conn)
+		}
 	}
+
 }
 
-//WILL NEED IMPROVEMENT TO WORK WITH INCONVENIENT p.threads (Assumes all sections are same height)
-func handleRequests(reqChan <-chan CellsFlippedRequest, sectionHeight int, p Params, c distributorChannels) {
+func handleRequests(reqChan <-chan CellsFlippedRequest, sectionHeight int, workers int, c distributorChannels, shutdownChan chan bool) {
+	fmt.Println("handleRequests():")
+	var req CellsFlippedRequest
+	var turn int
 	for {
-		turn := 0
-		for i := 0; i < p.Threads; i++ {
-			req := <-reqChan
+		for i := 0; i < workers; i++ {
+			select {
+			case REQ := <-reqChan:
+				req = REQ
+			case <-shutdownChan:
+				fmt.Println("handleRequests(): Shutting down")
+				return
+			}
 			turn = req.Turn
 			cellsFlipped := req.CellsFlipped
 			for _, cell := range cellsFlipped {
@@ -148,6 +190,7 @@ func handleError(err error) {
 	}
 }
 func initialiseWorkerConnections(ports []string, localHost string, distPort string, servers []*rpc.Client) {
+	fmt.Println("initialiseWorkerConnections():")
 	var err error
 	for i, port := range ports {
 		servers[i], err = rpc.Dial("tcp", localHost+port)
@@ -173,7 +216,8 @@ func initialiseWorkerConnections(ports []string, localHost string, distPort stri
 
 		//Blocking call
 		fmt.Println("HaloExchange.InitialiseConnection call made")
-		server.Call("HaloExchange.InitialiseConnection", request, &response)
+		err := server.Call("HaloExchange.InitialiseConnection", request, &response)
+		handleError(err)
 		fmt.Println("Rpc response received")
 
 		if response.LowerConnection && response.UpperConnection {
@@ -183,11 +227,11 @@ func initialiseWorkerConnections(ports []string, localHost string, distPort stri
 	}
 }
 
-func beginGol(servers []*rpc.Client, sectionHeight int, golWorld [][]uint8, p Params) {
+func beginGol(servers []*rpc.Client, sectionHeight int, golWorld [][]uint8, p Params, workers int) [][]uint8 {
 	fmt.Println("beginGol():")
 	wg := sync.WaitGroup{}
 	y := 0
-	completeSections := make([][][]uint8, p.Threads)
+	completeSections := make([][][]uint8, workers)
 	for i := 0; i < len(servers); i++ {
 		section := make([][]uint8, sectionHeight)
 		copy(section, golWorld[y:y+sectionHeight]) //Shallow copy
@@ -196,49 +240,79 @@ func beginGol(servers []*rpc.Client, sectionHeight int, golWorld [][]uint8, p Pa
 		response := new(HaloExchangeResponse)
 		wg.Add(1)
 		go func(I int, req HaloExchangeRequest, res *HaloExchangeResponse) {
-			fmt.Printf("i: %v\n", I)
 			fmt.Println("Making HaloExchange.Simulate rpc call")
-			servers[I].Call("HaloExchange.Simulate", req, res)
+
+			err := servers[I].Call("HaloExchange.Simulate", req, res)
 			fmt.Println("HaloExchange.Simulate rpc call response received")
+			handleError(err)
+
 			completeSections[I] = res.Section
 			wg.Done()
 		}(i, request, response)
 	}
 	wg.Wait()
+
+	var newGolWorld [][]uint8
+	for i := 0; i < len(completeSections); i++ {
+		newGolWorld = append(newGolWorld, completeSections[i]...)
+	}
+
 	fmt.Println("All workers have finished computation")
+	return newGolWorld
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 	fmt.Println("Distributor(): ")
 	//VARIABLE-INIT
-	ports := make([]string, p.Threads)
-	servers := make([]*rpc.Client, p.Threads)
-	sectionHeight := p.ImageHeight / p.Threads
-	reqChan := make(chan CellsFlippedRequest)
-	var golWorld [][]uint8
-
-	//Configuration for running 4 workers on local system
+	//Hard-coded configuration for 4 workers running on local system
 	distPort := "8040"
+	workers := 4
+	ports := make([]string, workers)
 	ports[0] = "8050"
 	ports[1] = "8060"
 	ports[2] = "8070"
 	ports[3] = "8080"
 	localHost := "127.0.0.1:"
 
-	//Start distributor server
+	servers := make([]*rpc.Client, workers)
+	sectionHeight := p.ImageHeight / workers
+	reqChan := make(chan CellsFlippedRequest)
+	var golWorld [][]uint8
+
+	//Initialize golWorld
 	golWorld = initializeGolMatrix(p, c)
 
-	go startDistServer(distPort, reqChan)
+	//Start distributor server
+	shutDownChan := make(chan bool)
+	shutDownCompleteChan := make(chan bool)
+	go startDistServer(distPort, reqChan, shutDownChan, shutDownCompleteChan)
 
 	//Start go routine to handle CellsFlippedRequests
-	go handleRequests(reqChan, sectionHeight, p, c)
+	shutDownChan2 := make(chan bool)
+	go handleRequests(reqChan, sectionHeight, workers, c, shutDownChan2)
 
 	//Make connection for every worker
 	initialiseWorkerConnections(ports, localHost, distPort, servers)
 
 	//Begin gol computation
-	beginGol(servers, sectionHeight, golWorld, p)
+	finishedWorld := beginGol(servers, sectionHeight, golWorld, p, workers)
+	finishedWorldImmutable := makeImmutableMatrix(finishedWorld)
+
+	aliveCells := FinalTurnComplete{CompletedTurns: p.Turns, Alive: calculateAliveCells(p, finishedWorldImmutable)}
+	c.events <- aliveCells
+
+	//Cleaning up
+	c.ioCommand <- ioCheckIdle
+	<-c.ioIdle
+
+	c.events <- StateChange{p.Turns, Quitting}
+
+	close(c.events)
+
+	shutDownChan <- true
+	shutDownChan2 <- true
+	<-shutDownCompleteChan
 
 }
 
@@ -246,16 +320,6 @@ func distributor(p Params, c distributorChannels) {
 func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 	return func(y, x int) uint8 {
 		return matrix[y][x]
-	}
-}
-
-//Go routine used to send a notification every time 2 seconds has passed
-
-func timer(timesUpChan chan int) {
-	for {
-		timesUpChan <- 1
-		time.Sleep(time.Second * 2)
-
 	}
 }
 

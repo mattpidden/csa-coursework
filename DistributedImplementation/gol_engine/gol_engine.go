@@ -166,24 +166,44 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 		req := CellsFlippedRequest{CellsFlipped: cellsFlipped, Turn: turn, WorkerID: (*g).WorkerID}
 		res := CellsFlippedResponse{}
 
-		(*g).distributor.Call("Receiver.CellsFlippedMethod", req, &res)
+		//Getting stuck here !!
+		err := (*g).distributor.Call("Receiver.CellsFlippedMethod", req, &res)
+		handleError(err)
+		fmt.Println("Passed  Receiver.CellsFlippedMethod")
 		//END-DEBUG
+
 		(*g).section = newSection
 		(*g).AllowGetRowTop <- true
 		(*g).AllowGetRowBottom <- true
 
 	}
+
 	fmt.Println("Simulate(): SIMULATION COMPLETE")
 	(*res).Section = (*g).section
+
+	//Reset g for next Simulate RPC call
+	*g = HaloExchange{
+		TopSent:           make(chan bool, 1),
+		BottomSent:        make(chan bool, 1),
+		AllowGetRowChan:   make(chan bool, 1),
+		AllowGetRowTop:    make(chan bool, 1),
+		AllowGetRowBottom: make(chan bool, 1),
+	}
+
+	//Close all connections
+	//(*g).distributor.Close()
+	/*(*g).above.Close()
+	(*g).below.Close()
+	(*g).distributor.Close()*/
 
 	return nil
 }
 
 //ISSUE PROBABLY HERE
-//Why is the number of cells flipped so high??
+//Why is the number of cells flipped so high?? -- found it
 func calcNextState(source func(y, x int) uint8, newSection *[][]uint8, cellsFlipped *[]util.Cell) {
 	for Y, row := range *newSection {
-		for X, _ := range row {
+		for X := range row {
 			liveNeighbours := 0
 			//fmt.Printf("X: %v, Y: %v\n", X, Y)
 			val := source(Y+1, X)
@@ -341,10 +361,12 @@ func main() {
 		AllowGetRowTop:    make(chan bool, 1),
 		AllowGetRowBottom: make(chan bool, 1),
 	}
-	rpc.Register(&g)
+	var err error
 
-	listener, _ := net.Listen("tcp", ":"+*pAddr)
-	defer listener.Close()
+	err = rpc.Register(&g)
+	handleError(err)
+	listener, err := net.Listen("tcp", ":"+*pAddr)
+	handleError(err)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
