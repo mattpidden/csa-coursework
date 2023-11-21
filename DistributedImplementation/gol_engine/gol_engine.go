@@ -139,6 +139,7 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 		//Initialise source matrix
 		sourceMatrix[0] = topRow
 		sourceMatrix[len(sourceMatrix)-1] = bottomRow
+
 		for y := 1; y < len(sourceMatrix)-1; y++ {
 			//sourceMatrix[y] = (*g).section[y-1]
 			copy(sourceMatrix[y], (*g).section[y-1])
@@ -146,7 +147,19 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 
 		cellsFlipped := make([]util.Cell, 0)
 		source := makeImmutableMatrix(sourceMatrix)
+
+		//DEBUG
+		//fmt.Printf("Simulate(): no. alive cells in sourceMatrix: %v\n", len(calculateAliveCells(len(sourceMatrix), len(sourceMatrix[0]), source)))
+		//END-DEBUG
+
 		calcNextState(source, &newSection, &cellsFlipped)
+
+		/*fmt.Println("Simulate(): (*g).section ")
+		outputMatrix((*g).section)
+		fmt.Println("Section(): ")
+		fmt.Println("Simulate(): newSection")
+		outputMatrix(newSection)*/
+
 		fmt.Printf("Simulate(): len(cellsFlipped): %v\n", len(cellsFlipped))
 
 		//Make RPC call to distributor containing cellsFlipped slice
@@ -197,6 +210,9 @@ func calcNextState(source func(y, x int) uint8, newSection *[][]uint8, cellsFlip
 			}
 
 			(*newSection)[Y][X] = determineVal(liveNeighbours, val, cellsFlipped, Y, X)
+			//DEBUG
+			//fmt.Printf("LN: %v, val %v, newSection[Y][X]: %v\n", liveNeighbours, val, (*newSection)[Y][X])
+			//END-DEBUG
 		}
 	}
 }
@@ -277,21 +293,24 @@ func determineVal(LN int, currentVal uint8, cellsFlipped *[]util.Cell, y, x int)
 	//fmt.Printf("determineVal(): LN: %v \n", LN)
 	if currentVal == 255 {
 		if LN < 2 {
+			//fmt.Println("Alive & LN < 2 : appending death to cellsFlipped")
 			*cellsFlipped = append(*cellsFlipped, util.Cell{X: x, Y: y})
-			return 255 //dies by under-population
+			return 0 //dies by under-population
 		}
 		if LN == 2 || LN == 3 {
 			return currentVal //unaffected
 		}
 		if LN > 3 {
+			//fmt.Println("Alive & LN > 3 : appending  death to cellsFlipped")
+
 			*cellsFlipped = append(*cellsFlipped, util.Cell{X: x, Y: y})
 			return 0 //dies by over population
 		}
-	}
-	//If cell is dead
-	if currentVal == 0 {
-		*cellsFlipped = append(*cellsFlipped, util.Cell{X: x, Y: y})
+	} else if currentVal == 0 {
+		//fmt.Println("Dead & LN == 3 : appending  life to cellsFlipped")
 		if LN == 3 {
+			*cellsFlipped = append(*cellsFlipped, util.Cell{X: x, Y: y})
+
 			return 255 //lives
 		}
 	}
@@ -334,3 +353,21 @@ func main() {
 		go rpc.ServeConn(conn)
 	}
 }
+
+//DEBUG-METHODS
+func outputMatrix(matrix [][]uint8) {
+	var v string
+	for _, row := range matrix {
+		for _, val := range row {
+			if val == 255 {
+				v = " 255 "
+			} else {
+				v = "  0  "
+			}
+			fmt.Printf("%v", v)
+		}
+		fmt.Printf("\n")
+	}
+}
+
+//END-DEBUG-METHODS
