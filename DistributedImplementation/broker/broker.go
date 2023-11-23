@@ -188,7 +188,7 @@ func (g *BrokerOperations) StartGolExecution(req StartGolExecutionRequest, res *
 					EndHeight:   endHeight,
 				}
 				response := new(StartEngineResponse)
-				engines[index].Call("GoLOperations.RunEngine", request, response)
+				engines[index].Call("GoLOperations.RunParallelEngine", request, response)
 				channels[index] <- response.GolWorld
 			}(i)
 		}

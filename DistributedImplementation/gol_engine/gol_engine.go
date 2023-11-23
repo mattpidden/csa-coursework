@@ -139,9 +139,27 @@ func (g *GoLOperations) RunParallelEngine(req StartEngineRequest, res *StartEngi
 	//Wrapping starting world in closure
 	immutableData := makeImmutableMatrix(req.GolWorld)
 
-	//Processing only the strip of the image, then return that strip in the response
-	newStripData := calculateNextState(req.ImageHeight, req.ImageWidth, req.StartHeight, req.EndHeight, makeImmutableMatrix(req.GolWorld))
-	res.GolWorld = newStripData
+	//Assigning each goroutine, their slice of the image, and respective channel
+	for i := 0; i < numberWorks; i++ {
+		startHeight := (i * cuttingHeight) + req.StartHeight
+		endHeight := ((i + 1) * cuttingHeight) + req.StartHeight
+		if i == numberWorks-1 {
+			endHeight = req.EndHeight
+		}
+		go func(index int) {
+			newStrip := calculateNextState(req.ImageHeight, req.ImageWidth, startHeight, endHeight, immutableData)
+			channels[index] <- newStrip
+		}(i)
+	}
+
+	//Creating var to store new world data in
+	var newGolWorld [][]uint8
+	//Receive all data back from worker goroutines and stitch image back together
+	for i := 0; i < numberWorks; i++ {
+		newGolWorld = append(newGolWorld, <-channels[i]...)
+	}
+
+	res.GolWorld = newGolWorld
 	return
 }
 
