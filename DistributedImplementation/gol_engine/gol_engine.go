@@ -122,6 +122,29 @@ func (g *GoLOperations) getGolWorld() [][]uint8 {
 	return g.golWorld
 }
 
+func (g *GoLOperations) RunParallelEngine(req StartEngineRequest, res *StartEngineResponse) (err error) {
+	fmt.Println("GoLOperations.RunParallelEngine")
+	const numberWorks = 4
+	stripHeight := req.EndHeight - req.StartHeight
+
+	//Creating slice of channels, initialized with channels, for each worker goroutine
+	var channels []chan [][]uint8
+	for i := 0; i < numberWorks; i++ {
+		newChan := make(chan [][]uint8)
+		channels = append(channels, newChan)
+	}
+	//Defining the height of image for each worker
+	cuttingHeight := stripHeight/numberWorks
+
+	//Wrapping starting world in closure
+	immutableData := makeImmutableMatrix(req.GolWorld)
+
+	//Processing only the strip of the image, then return that strip in the response
+	newStripData := calculateNextState(req.ImageHeight, req.ImageWidth, req.StartHeight, req.EndHeight, makeImmutableMatrix(req.GolWorld))
+	res.GolWorld = newStripData
+	return
+}
+
 func (g *GoLOperations) RunEngine(req StartEngineRequest, res *StartEngineResponse) (err error) {
 	fmt.Println("GoLOperations.RunEngine")
 	//Processing only the strip of the image, then return that strip in the response
