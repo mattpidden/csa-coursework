@@ -102,7 +102,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		ImageWidth: p.ImageWidth,
 		Threads:     p.Threads,
 		//Change this variable to control if the local controller takes over a previous controllers processing on the remote engine
-		ContinuePreviousWorld: true,
+		ContinuePreviousWorld: false,
 	}
 	response := new(SingleThreadExecutionResponse)
 
@@ -118,6 +118,8 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	//Running go routine to be flagging for updates every 2 seconds
 	go timer(timesUp)
 
+	finish := make(chan bool)
+	go handleKeyPress(server, p, c, keyPresses, finish)
 
 	latestGolWorld := golWorld
 
@@ -126,8 +128,6 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		select {
 		case <-golWorldProcessed:
 			doneProcessing = true
-		case key := <- keyPresses:
-			handleKeyPress(server, key, p, c, keyPresses)
 		case <-timesUp:
 			//make RPC call
 			emptyRpcRequest := EmptyRpcRequest{}
@@ -146,6 +146,8 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		default:
 		}
 	}
+
+	finish <- true
 
 	//Get server response once gol world done processing on server
 	newGolWorld := response.GolWorld
@@ -199,62 +201,70 @@ func checkForCellFlips(oldGolWorld func(y, x int) uint8, newWorld func(y, x int)
 	}
 }
 
-func handleKeyPress(server *rpc.Client, key rune, p Params, c distributorChannels, keyPresses <-chan rune) {
-	switch key {
-	case 's':
-		//Generate a PGM file with the current state of the board (got with a rpc call)
-		fmt.Println("s pressed.")
-		emptyRpcRequest := EmptyRpcRequest{}
-		boardStateResponse := new(GetBoardStateResponse)
-		server.Call("GoLOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
-		immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
-		filename := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(boardStateResponse.Turns)
-		outputImage(filename, boardStateResponse.Turns, immutableData, p, c)
-	case 'q':
-		fmt.Println("q pressed.")
-		//Close the controller client program without causing an error on the gol engine server.
-		//A new local controller should be able to re-interact with the server
-		engineStateRequest := EngineStateRequest{State: Quiting}
-		boardStateResponse := new(GetBoardStateResponse)
-		server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
-		fmt.Println("Local Controller Quiting")
-	case 'k':
-		fmt.Println("k pressed.")
-		//All components of the distributed system should be shut down cleanly, and the system should output a PGM image of the latest data
-		engineStateRequest := EngineStateRequest{State: Killing}
-		boardStateResponse := new(GetBoardStateResponse)
-		server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
-		fmt.Println("Killing Distributed System")
-	case 'p':
-		fmt.Println("p pressed.")
-		//Pause the processing on the gol engine server node and have the controller print the current turn that is being processed
-		//If p is pressed again resume the processing and have the controller print "Continuing"
-		//It is not necessary for q and s to work while the execution is paused.
-		engineStateRequest := EngineStateRequest{State: Pausing}
-		boardStateResponse := new(GetBoardStateResponse)
-		server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
-		c.events <- StateChange{
-			CompletedTurns: boardStateResponse.Turns,
-			NewState:       Paused,
+func handleKeyPress(server *rpc.Client, p Params, c distributorChannels, keyPresses <-chan rune, finish chan bool) {
+	for {
+		select {
+			case <-finish:
+				break
+			case key := <-keyPresses:
+				switch key {
+				case 's':
+					//Generate a PGM file with the current state of the board (got with a rpc call)
+					fmt.Println("s pressed.")
+					emptyRpcRequest := EmptyRpcRequest{}
+					boardStateResponse := new(GetBoardStateResponse)
+					server.Call("GoLOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
+					immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
+					filename := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(boardStateResponse.Turns)
+					outputImage(filename, boardStateResponse.Turns, immutableData, p, c)
+				case 'q':
+					fmt.Println("q pressed.")
+					//Close the controller client program without causing an error on the gol engine server.
+					//A new local controller should be able to re-interact with the server
+					engineStateRequest := EngineStateRequest{State: Quiting}
+					boardStateResponse := new(GetBoardStateResponse)
+					server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
+					fmt.Println("Local Controller Quiting")
+				case 'k':
+					fmt.Println("k pressed.")
+					//All components of the distributed system should be shut down cleanly, and the system should output a PGM image of the latest data
+					engineStateRequest := EngineStateRequest{State: Killing}
+					boardStateResponse := new(GetBoardStateResponse)
+					server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
+					fmt.Println("Killing Distributed System")
+				case 'p':
+					fmt.Println("p pressed.")
+					//Pause the processing on the gol engine server node and have the controller print the current turn that is being processed
+					//If p is pressed again resume the processing and have the controller print "Continuing"
+					//It is not necessary for q and s to work while the execution is paused.
+					engineStateRequest := EngineStateRequest{State: Pausing}
+					boardStateResponse := new(GetBoardStateResponse)
+					server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
+					c.events <- StateChange{
+						CompletedTurns: boardStateResponse.Turns,
+						NewState:       Paused,
+					}
+
+					unpaused := false
+					for !unpaused {
+						switch <-keyPresses {
+						case 'p':
+							unpaused = true
+							engineStateRequest := EngineStateRequest{State: Running}
+							boardStateResponse := new(GetBoardStateResponse)
+							server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
+							fmt.Println("Continuing...")
+							c.events <- StateChange{
+								CompletedTurns: boardStateResponse.Turns,
+								NewState:       Executing,
+							}
+						default:
+							fmt.Println("No other functionality available whilst paused. Press 'p' to resume. ")
+						}
+					}
+				}
 		}
 
-		unpaused := false
-		for !unpaused {
-			switch <-keyPresses {
-			case 'p':
-				unpaused = true
-				engineStateRequest := EngineStateRequest{State: Running}
-				boardStateResponse := new(GetBoardStateResponse)
-				server.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
-				fmt.Println("Continuing...")
-				c.events <- StateChange{
-					CompletedTurns: boardStateResponse.Turns,
-					NewState:       Executing,
-				}
-			default:
-				fmt.Println("No other functionality available whilst paused. Press 'p' to resume. ")
-			}
-		}
 	}
 }
 

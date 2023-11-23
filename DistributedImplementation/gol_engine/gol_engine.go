@@ -3,10 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"net/rpc"
 	"sync"
-	"uk.ac.bris.cs/gameoflife/util"
 )
 
 const (
@@ -30,10 +30,6 @@ type SingleThreadExecutionRequest struct {
 	ContinuePreviousWorld bool
 }
 
-type GetCellsAliveResponse struct {
-	Turns int
-	CellsAlive int
-}
 
 type GetBoardStateResponse struct {
 	GolWorld [][]uint8
@@ -46,7 +42,6 @@ type EngineStateRequest struct {
 
 type EmptyRpcRequest struct {}
 
-type EmptyRpcResponse struct {}
 
 func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 	return func(y, x int) uint8 {
@@ -54,23 +49,6 @@ func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 	}
 }
 
-func calculateAliveCells(imageHeight, imageWidth int, data func(y, x int) uint8) []util.Cell {
-	var aliveCells []util.Cell
-	//Loops through entire GoL world
-	for i := 0; i < imageHeight; i++ {
-		for j := 0; j < imageWidth; j++ {
-			//If cell is alive, create cell and append to slice
-			if data(i, j) == 255 {
-				newCell := util.Cell{
-					X: j,
-					Y: i,
-				}
-				aliveCells = append(aliveCells, newCell)
-			}
-		}
-	}
-	return aliveCells
-}
 
 func calculateNextState(imageHeight, imageWidth, turn, startY, endY, startX, endX int, data func(y, x int) uint8) [][]uint8 {
 
@@ -133,6 +111,7 @@ type GoLOperations struct {
 	turn int
 	lock sync.Mutex
 	killingChannel chan bool
+	wg sync.WaitGroup
 }
 
 func (g *GoLOperations) updateGolWorld(newWorld [][]uint8) {
@@ -224,39 +203,47 @@ func (g *GoLOperations) GetBoardState(req EmptyRpcRequest, res *GetBoardStateRes
 	return
 }
 
-func (g *GoLOperations) GetCellsAlive(req EmptyRpcRequest, res *GetCellsAliveResponse) (err error) {
-	fmt.Println("GoLOperations.GetCellsAlive called")
-
-	GolWorld := g.getGolWorld()
-	imageHeight := g.imageHeight
-	imageWidth := g.imageWidth
-
-	immutableData := makeImmutableMatrix(GolWorld)
-	res.Turns = g.turn
-	//Even though there are often cells alive at the start, the testing seems to think there is not
-	if g.turn == 0 {
-		res.CellsAlive = 0
-	}  else {
-		res.CellsAlive = len(calculateAliveCells(imageHeight, imageWidth, immutableData))
-	}
-	return
-}
 
 func main() {
 	pAddr := flag.String("port", "8030", "Port to listen on")
 	flag.Parse()
 
 	killingChannel := make(chan bool)
-	rpc.Register(&GoLOperations{killingChannel: killingChannel})
+	golOps := &GoLOperations{killingChannel: killingChannel}
+	rpc.Register(golOps)
 
 
 	listener, _ := net.Listen("tcp", ":"+*pAddr)
 	defer listener.Close()
 
 	go func() {
-		rpc.Accept(listener)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				// Check if the listener is closed intentionally
+				select {
+				case <-killingChannel:
+					return
+				default:
+					log.Fatal(err)
+				}
+			}
+
+			golOps.wg.Add(1)
+			go func() {
+				defer golOps.wg.Done()
+				rpc.ServeConn(conn)
+			}()
+		}
 	}()
 
-	//Waits to receive anything in the killingChannel to kill the server
-	<- killingChannel
+	fmt.Println("GolEngine server started on port:", *pAddr)
+
+	// Wait for the server to be signaled to stop
+	<-killingChannel
+
+	//Wait for ongoing RPC calls to complete gracefully
+	golOps.wg.Wait()
+
+	fmt.Println("Server gracefully stopped.")
 }
