@@ -1,6 +1,7 @@
 package gol
 
 import (
+	"fmt"
 	"net/rpc"
 	"strconv"
 	"time"
@@ -24,6 +25,8 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
+// BROKER RPC STRUCTURES BELOW
+
 type StartGolExecutionRequest struct {
 	GolWorld [][]uint8
 	Turns int
@@ -37,6 +40,20 @@ type StartGolExecutionResponse struct {
 	GolWorld [][]uint8
 	Turns int
 }
+
+type GetBoardStateResponse struct {
+	GolWorld [][]uint8
+	Turns int
+}
+
+type EngineStateRequest struct {
+	State int
+}
+
+type EmptyRpcRequest struct {}
+
+type EmptyRpcResponse struct {}
+
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
@@ -71,7 +88,13 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	//Take input of server:port
 	//serveradd := "18.233.91.29:8030"
 	serveradd := "127.0.0.1:8030"
-	broker, _ := rpc.Dial("tcp", serveradd)
+	broker, err := rpc.Dial("tcp", serveradd)
+	if err == nil {
+		//fmt.Println("Dialed:", serveradd)
+	} else {
+		fmt.Println("Error:", err)
+		panic("Could not connect to broker.")
+	}
 	defer broker.Close()
 
 	//CALL BROKER TO START EXECUTION
@@ -94,41 +117,15 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		golWorldProcessed <- true
 	}()
 
-	//Setting up chan for 2 second updates
-	timesUp := make(chan int)
 	//Running go routine to be flagging for updates every 2 seconds
-	go timer(timesUp)
+	finish := make(chan bool)
+	go timer(broker, golWorld, p, c, finish)
+	go handleKeyPress(broker, p, c, keyPresses, finish)
 
-
-	//latestGolWorld := golWorld
-
-	doneProcessing := false
-	for !doneProcessing {
-		select {
-		case <-golWorldProcessed:
-			doneProcessing = true
-		case key := <- keyPresses:
-			handleKeyPress(broker, key, p, c, keyPresses)
-		case <-timesUp:
-			//make RPC call
-			/*
-			emptyRpcRequest := EmptyRpcRequest{}
-
-			boardStateResponse := new(GetBoardStateResponse)
-			broker.Call("GoLOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
-			immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
-
-			//report alive cell count to channel
-			c.events <- AliveCellsCount{CompletedTurns: boardStateResponse.Turns, CellsCount: len(calculateAliveCells(p, immutableData))}
-
-			//Visualise gol on sdl window
-			checkForCellFlips(makeImmutableMatrix(latestGolWorld), makeImmutableMatrix(boardStateResponse.GolWorld), boardStateResponse.Turns, p, c)
-			c.events <- TurnComplete{CompletedTurns: boardStateResponse.Turns}
-			latestGolWorld = boardStateResponse.GolWorld
-			 */
-		default:
-		}
-	}
+	//Waiting for the world to be finished processing, then stopping the keypresses and timer cgo routines
+	<- golWorldProcessed
+	finish <- true
+	finish <- true
 
 	//Get broker response once gol world done processing on broker
 	newGolWorld := response.GolWorld
@@ -164,10 +161,28 @@ func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 
 //Go routine used to send a notification every time 2 seconds has passed
 
-func timer(timesUpChan chan int) {
+func timer(broker *rpc.Client, latestGolWorld [][]uint8, p Params, c distributorChannels, finish chan bool) {
 	for {
 		time.Sleep(time.Second * 2)
-		timesUpChan <- 1
+		select {
+			case <- finish:
+				break
+		default:
+
+		}
+
+		emptyRpcRequest := EmptyRpcRequest{}
+		boardStateResponse := new(GetBoardStateResponse)
+		broker.Call("BrokerOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
+		immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
+
+		//report alive cell count to channel
+		c.events <- AliveCellsCount{CompletedTurns: boardStateResponse.Turns, CellsCount: len(calculateAliveCells(p, immutableData))}
+
+		//Visualise gol on sdl window
+		checkForCellFlips(makeImmutableMatrix(latestGolWorld), makeImmutableMatrix(boardStateResponse.GolWorld), boardStateResponse.Turns, p, c)
+		c.events <- TurnComplete{CompletedTurns: boardStateResponse.Turns}
+		latestGolWorld = boardStateResponse.GolWorld
 	}
 }
 
@@ -182,65 +197,70 @@ func checkForCellFlips(oldGolWorld func(y, x int) uint8, newWorld func(y, x int)
 	}
 }
 
-func handleKeyPress(broker *rpc.Client, key rune, p Params, c distributorChannels, keyPresses <-chan rune) {
-	/*
-	switch key {
-	case 's':
-		//Generate a PGM file with the current state of the board (got with a rpc call)
-		fmt.Println("s pressed.")
-		emptyRpcRequest := EmptyRpcRequest{}
-		boardStateResponse := new(GetBoardStateResponse)
-		broker.Call("GoLOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
-		immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
-		filename := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(boardStateResponse.Turns)
-		outputImage(filename, boardStateResponse.Turns, immutableData, p, c)
-	case 'q':
-		fmt.Println("q pressed.")
-		//Close the controller client program without causing an error on the gol engine broker.
-		//A new local controller should be able to re-interact with the broker
-		engineStateRequest := EngineStateRequest{State: Quiting}
-		boardStateResponse := new(GetBoardStateResponse)
-		broker.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
-		fmt.Println("Local Controller Quiting")
-	case 'k':
-		fmt.Println("k pressed.")
-		//All components of the distributed system should be shut down cleanly, and the system should output a PGM image of the latest data
-		engineStateRequest := EngineStateRequest{State: Killing}
-		boardStateResponse := new(GetBoardStateResponse)
-		broker.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
-		fmt.Println("Killing Distributed System")
-	case 'p':
-		fmt.Println("p pressed.")
-		//Pause the processing on the gol engine broker node and have the controller print the current turn that is being processed
-		//If p is pressed again resume the processing and have the controller print "Continuing"
-		//It is not necessary for q and s to work while the execution is paused.
-		engineStateRequest := EngineStateRequest{State: Pausing}
-		boardStateResponse := new(GetBoardStateResponse)
-		broker.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
-		c.events <- StateChange{
-			CompletedTurns: boardStateResponse.Turns,
-			NewState:       Paused,
-		}
+func handleKeyPress(broker *rpc.Client, p Params, c distributorChannels, keyPresses <-chan rune, finish chan bool) {
+	for {
+		select {
+			case <-finish:
+				break
+			case key := <- keyPresses:
+				switch key {
+				case 's':
+					//Generate a PGM file with the current state of the board (got with a rpc call)
+					fmt.Println("s pressed.")
+					emptyRpcRequest := EmptyRpcRequest{}
+					boardStateResponse := new(GetBoardStateResponse)
+					broker.Call("BrokerOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
+					immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
+					filename := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(boardStateResponse.Turns)
+					outputImage(filename, boardStateResponse.Turns, immutableData, p, c)
+				case 'q':
+					fmt.Println("q pressed.")
+					//Close the controller client program without causing an error on the gol engine broker.
+					//A new local controller should be able to re-interact with the broker
+					engineStateRequest := EngineStateRequest{State: Quiting}
+					boardStateResponse := new(GetBoardStateResponse)
+					broker.Call("BrokerOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
+					fmt.Println("Local Controller Quiting")
+				case 'k':
+					fmt.Println("k pressed.")
+					//All components of the distributed system should be shut down cleanly, and the system should output a PGM image of the latest data
+					engineStateRequest := EngineStateRequest{State: Killing}
+					boardStateResponse := new(GetBoardStateResponse)
+					broker.Call("BrokerOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
+					fmt.Println("Killing Distributed System")
+				case 'p':
+					fmt.Println("p pressed.")
+					//Pause the processing on the gol engine broker node and have the controller print the current turn that is being processed
+					//If p is pressed again resume the processing and have the controller print "Continuing"
+					//It is not necessary for q and s to work while the execution is paused.
+					engineStateRequest := EngineStateRequest{State: Pausing}
+					boardStateResponse := new(GetBoardStateResponse)
+					broker.Call("BrokerOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
+					c.events <- StateChange{
+						CompletedTurns: boardStateResponse.Turns,
+						NewState:       Paused,
+					}
 
-		unpaused := false
-		for !unpaused {
-			switch <-keyPresses {
-			case 'p':
-				unpaused = true
-				engineStateRequest := EngineStateRequest{State: Running}
-				boardStateResponse := new(GetBoardStateResponse)
-				broker.Call("GoLOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
-				fmt.Println("Continuing...")
-				c.events <- StateChange{
-					CompletedTurns: boardStateResponse.Turns,
-					NewState:       Executing,
+					unpaused := false
+					for !unpaused {
+						switch <-keyPresses {
+						case 'p':
+							unpaused = true
+							engineStateRequest := EngineStateRequest{State: Running}
+							boardStateResponse := new(GetBoardStateResponse)
+							broker.Call("BrokerOperations.SetGolEngineState", engineStateRequest, boardStateResponse)
+							fmt.Println("Continuing...")
+							c.events <- StateChange{
+								CompletedTurns: boardStateResponse.Turns,
+								NewState:       Executing,
+							}
+						default:
+							fmt.Println("No other functionality available whilst paused. Press 'p' to resume. ")
+						}
+					}
 				}
-			default:
-				fmt.Println("No other functionality available whilst paused. Press 'p' to resume. ")
-			}
 		}
 	}
-	 */
 }
 
 //Input: p of type Params containing data about the world

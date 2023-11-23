@@ -3,10 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"net/rpc"
 	"sync"
-	"uk.ac.bris.cs/gameoflife/util"
 )
 
 const (
@@ -14,31 +14,12 @@ const (
 	Pausing int = 1
 	Quiting int = 2
 	Killing int = 3
+	Waiting int = 4
 )
 
-type SingleThreadExecutionResponse struct {
-	GolWorld [][]uint8
-	Turns int
-}
 
-type SingleThreadExecutionRequest struct {
-	GolWorld [][]uint8
-	Turns int
-	ImageHeight int
-	ImageWidth int
-	Threads int
-	ContinuePreviousWorld bool
-}
 
-type GetCellsAliveResponse struct {
-	Turns int
-	CellsAlive int
-}
 
-type GetBoardStateResponse struct {
-	GolWorld [][]uint8
-	Turns int
-}
 
 type EngineStateRequest struct {
 	State int
@@ -56,7 +37,6 @@ type StartEngineResponse struct {
 	GolWorld [][]uint8
 }
 
-type EmptyRpcRequest struct {}
 
 type EmptyRpcResponse struct {}
 
@@ -64,24 +44,6 @@ func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 	return func(y, x int) uint8 {
 		return matrix[y][x]
 	}
-}
-
-func calculateAliveCells(imageHeight, imageWidth int, data func(y, x int) uint8) []util.Cell {
-	var aliveCells []util.Cell
-	//Loops through entire GoL world
-	for i := 0; i < imageHeight; i++ {
-		for j := 0; j < imageWidth; j++ {
-			//If cell is alive, create cell and append to slice
-			if data(i, j) == 255 {
-				newCell := util.Cell{
-					X: j,
-					Y: i,
-				}
-				aliveCells = append(aliveCells, newCell)
-			}
-		}
-	}
-	return aliveCells
 }
 
 func calculateNextState(imageHeight, imageWidth, startY, endY int, data func(y, x int) uint8) [][]uint8 {
@@ -130,9 +92,9 @@ func calculateNextState(imageHeight, imageWidth, startY, endY int, data func(y, 
 			}
 		}
 	}
+
 	//trim future world
 	future = future[startY:endY]
-
 	return future
 }
 
@@ -145,6 +107,7 @@ type GoLOperations struct {
 	turn int
 	lock sync.Mutex
 	killingChannel chan bool
+	wg sync.WaitGroup
 }
 
 func (g *GoLOperations) updateGolWorld(newWorld [][]uint8) {
@@ -160,102 +123,17 @@ func (g *GoLOperations) getGolWorld() [][]uint8 {
 }
 
 func (g *GoLOperations) RunEngine(req StartEngineRequest, res *StartEngineResponse) (err error) {
-	//TODO processing only the strip of the image, then return that strip in the response
+	fmt.Println("GoLOperations.RunEngine")
+	//Processing only the strip of the image, then return that strip in the response
 	newStripData := calculateNextState(req.ImageHeight, req.ImageWidth, req.StartHeight, req.EndHeight, makeImmutableMatrix(req.GolWorld))
 	res.GolWorld = newStripData
 	return
 }
-func (g *GoLOperations) SingleThreadExecution(req SingleThreadExecutionRequest, res *SingleThreadExecutionResponse) (err error) {
-	fmt.Println("GoLOperations.SingleThreadExecution called")
-	totalTurns := req.Turns
-	imageWidth := req.ImageWidth
-	imageHeight := req.ImageHeight
-	firstTurn := 0
-	newGolWorld := req.GolWorld
 
-	//If a previous world was quite and the new controller would like to continue processing that world...
-	if g.state == Quiting && req.ContinuePreviousWorld {
-		//Then set all the values to that of the last saved state of previous world
-		fmt.Println("Continuing execution of previous world")
-		totalTurns = g.totalTurns
-		imageWidth = g.imageWidth
-		imageHeight = g.imageHeight
-		firstTurn = g.turn
-		newGolWorld = g.getGolWorld()
-	} else {
-		//Otherwise set some values in the structure, so that other functions can access them
-		g.totalTurns = req.Turns
-		g.imageWidth = req.ImageWidth
-		g.imageHeight = req.ImageHeight
-		g.turn = 0
-		g.updateGolWorld(req.GolWorld)
-	}
-
-	g.state = Running
-
-	for t := firstTurn; t < totalTurns; t++ {
-
-		//On each iteration, check the state and act accordingly
-		currentState := g.state
-		if currentState == Quiting {
-			fmt.Println("Local Controller Quit")
-			break
-		} else if currentState == Killing {
-			fmt.Println("Killing Distributed System")
-			break
-		} else if currentState == Pausing {
-			fmt.Println("Running Paused")
-			for g.state != Running {}
-			fmt.Println("Running Resumed")
-		}
-
-		//Do the iterations computation
-		g.turn = t
-		immutableData := makeImmutableMatrix(newGolWorld)
-		newGolWorld = calculateNextState(imageHeight, imageWidth, 0, imageHeight, immutableData)
-		g.updateGolWorld(newGolWorld)
-	}
-
-	res.Turns = g.turn
-	res.GolWorld = g.getGolWorld()
-	fmt.Println("Finished Running SingleThreadExecution ")
-
-	//If killing selected, let main function know to end it all
-	if g.state == Killing {
-		g.killingChannel <- true
-	}
-
-	return
-}
-
-func (g *GoLOperations) SetGolEngineState(req EngineStateRequest, res *GetBoardStateResponse) (err error) {
+func (g *GoLOperations) SetGolEngineState(req EngineStateRequest, res *EmptyRpcResponse) (err error) {
 	fmt.Println("GoLOperations.SetGolEngineState called")
-	g.state = req.State
-	res.Turns = g.turn
-	res.GolWorld = g.getGolWorld()
-	return
-}
-func (g *GoLOperations) GetBoardState(req EmptyRpcRequest, res *GetBoardStateResponse) (err error) {
-	fmt.Println("GoLOperations.GetBoardState called")
-	res.Turns = g.turn
-	res.GolWorld = g.getGolWorld()
-	return
-}
-
-func (g *GoLOperations) GetCellsAlive(req EmptyRpcRequest, res *GetCellsAliveResponse) (err error) {
-	fmt.Println("GoLOperations.GetCellsAlive called")
-
-	GolWorld := g.getGolWorld()
-	imageHeight := g.imageHeight
-	imageWidth := g.imageWidth
-
-	immutableData := makeImmutableMatrix(GolWorld)
-	res.Turns = g.turn
-	//Even though there are often cells alive at the start, the testing seems to think there is not
-	if g.turn == 0 {
-		res.CellsAlive = 0
-	}  else {
-		res.CellsAlive = len(calculateAliveCells(imageHeight, imageWidth, immutableData))
+	if req.State == Killing {
+		g.killingChannel <- true
 	}
 	return
 }
@@ -265,16 +143,40 @@ func main() {
 	flag.Parse()
 
 	killingChannel := make(chan bool)
-	rpc.Register(&GoLOperations{killingChannel: killingChannel})
+	golOps := &GoLOperations{killingChannel: killingChannel}
+	rpc.Register(golOps)
 
 
 	listener, _ := net.Listen("tcp", ":"+*pAddr)
-	defer listener.Close()
 
 	go func() {
-		rpc.Accept(listener)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				// Check if the listener is closed intentionally
+				select {
+				case <-killingChannel:
+					return
+				default:
+					log.Fatal(err)
+				}
+			}
+
+			golOps.wg.Add(1)
+			go func() {
+				defer golOps.wg.Done()
+				rpc.ServeConn(conn)
+			}()
+		}
 	}()
 
-	//Waits to receive anything in the killingChannel to kill the server
-	<- killingChannel
+	fmt.Println("GolEngine server started on port:", *pAddr)
+
+	// Wait for the server to be signaled to stop
+	<-killingChannel
+
+	//Wait for ongoing RPC calls to complete gracefully
+	golOps.wg.Wait()
+
+	fmt.Println("Engine gracefully stopped.")
 }

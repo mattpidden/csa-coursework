@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"net/rpc"
+	"strconv"
 	"sync"
 )
 
@@ -31,6 +33,19 @@ type StartGolExecutionResponse struct {
 	Turns int
 }
 
+type GetBoardStateResponse struct {
+	GolWorld [][]uint8
+	Turns int
+}
+
+type EngineStateRequest struct {
+	State int
+}
+
+type EmptyRpcRequest struct {}
+
+type EmptyRpcResponse struct {}
+
 // GOL_ENGINE REQ/RES STRUCTS
 
 type StartEngineRequest struct {
@@ -54,6 +69,8 @@ type BrokerOperations struct {
 	turn int
 	lock sync.Mutex
 	killingChannel chan bool
+	wg sync.WaitGroup
+
 }
 
 func (g *BrokerOperations) updateGolWorld(newWorld [][]uint8) {
@@ -68,13 +85,45 @@ func (g *BrokerOperations) getGolWorld() [][]uint8 {
 	return g.golWorld
 }
 
+func (g *BrokerOperations) killBroker() {
+	g.killingChannel <- true
+}
+
+
 func (g *BrokerOperations) StartGolExecution(req StartGolExecutionRequest, res *StartGolExecutionResponse) (err error) {
-	fmt.Println("BrokerOperations.StartGolExecution called")
+	fmt.Println("BrokerOperations.StartGolExecution called on " + strconv.Itoa(req.Turns) + " turns")
+
+	if req.Turns == 0 {
+		res.Turns = 0
+		res.GolWorld = req.GolWorld
+		return
+	}
+
 	totalTurns := req.Turns
 	imageWidth := req.ImageWidth
 	imageHeight := req.ImageHeight
 	firstTurn := 0
 	newGolWorld := req.GolWorld
+
+	//If a previous world was quit and the new controller would like to continue processing that world...
+	if g.state == Quiting && req.ContinuePreviousWorld {
+		//Then set all the values to that of the last saved state of previous world
+		fmt.Println("Continuing execution of previous world")
+		totalTurns = g.totalTurns
+		imageWidth = g.imageWidth
+		imageHeight = g.imageHeight
+		firstTurn = g.turn
+		newGolWorld = g.getGolWorld()
+	} else {
+		//Otherwise set some values in the structure, so that other functions can access them
+		g.totalTurns = req.Turns
+		g.imageWidth = req.ImageWidth
+		g.imageHeight = req.ImageHeight
+		g.turn = 0
+		g.updateGolWorld(req.GolWorld)
+	}
+
+	g.state = Running
 
 	//A list of 4 server address, connect to each one and defer the closing of each one
 	workerAddresses := []string{"127.0.0.1:8040", "127.0.0.1:8041", "127.0.0.1:8042", "127.0.0.1:8043"}
@@ -84,7 +133,9 @@ func (g *BrokerOperations) StartGolExecution(req StartGolExecutionRequest, res *
 	// Loop to dial and defer the closing of each engine
 	for _, address := range workerAddresses {
 		engine, err := rpc.Dial("tcp", address)
-		if err != nil {
+		if err == nil {
+			//fmt.Println("Dialed:", address)
+		} else {
 			fmt.Println("Error connecting to", address, ":", err)
 			g.state = Quiting
 		}
@@ -105,17 +156,30 @@ func (g *BrokerOperations) StartGolExecution(req StartGolExecutionRequest, res *
 
 	//Run each iteration of the GoL on the broker
 	for t := firstTurn; t < totalTurns; t++ {
+		//On each iteration, check the state and act accordingly
+		currentState := g.state
+		if currentState == Quiting {
+			fmt.Println("Local Controller Quit")
+			break
+		} else if currentState == Killing {
+			fmt.Println("Killing Distributed System")
+			break
+		} else if currentState == Pausing {
+			fmt.Println("Running Paused")
+			for g.state != Running {}
+			fmt.Println("Running Resumed")
+		}
+
+		g.turn = t
 		//Creating var to store new world data in
 		var processedGolWorld [][]uint8
 
-		//Assigning each goroutine, their slice of the image, and respective channel
+		//Assigning each goroutine, their range of the image, and respective channel
 		for i := 0; i < 4; i++ {
 			go func(index int) {
 				startHeight := index * cuttingHeight
 				endHeight := (index + 1) * cuttingHeight
-				if index == 3 {
-					endHeight = imageHeight
-				}
+
 				request := StartEngineRequest{
 					GolWorld:    newGolWorld,
 					ImageHeight: imageHeight,
@@ -129,19 +193,50 @@ func (g *BrokerOperations) StartGolExecution(req StartGolExecutionRequest, res *
 			}(i)
 		}
 
+
 		//Put the world back together and then repeat
 		for i := 0; i < 4; i++ {
-			processedGolWorld = append(newGolWorld, <-channels[i]...)
+			processedGolWorld = append(processedGolWorld, <-channels[i]...)
 		}
 
 		newGolWorld = processedGolWorld
-		g.updateGolWorld(newGolWorld)
-		g.turn = t
+		g.updateGolWorld(processedGolWorld)
 	}
 
 	//Once all iterations done, return the final gol world
 	res.GolWorld = g.getGolWorld()
 	res.Turns = g.turn
+	fmt.Println("Finished Running StartGolExecution")
+
+	//If killing selected, send request to kill all the gol worker engines
+	if g.state == Killing {
+		for _, engine := range engines {
+			request := EngineStateRequest{State: Killing}
+			response := new(EmptyRpcResponse)
+			engine.Call("GoLOperations.SetGolEngineState", request, response)
+		}
+
+	}
+
+	//Then shutdown the broker :(
+	if g.state == Killing {
+		g.killingChannel <- true
+	}
+	return
+}
+
+func (g *BrokerOperations) GetBoardState(req EmptyRpcRequest, res *GetBoardStateResponse) (err error) {
+	fmt.Println("BrokerOperations.GetBoardState called")
+	res.Turns = g.turn
+	res.GolWorld = g.getGolWorld()
+	return
+}
+
+func (g *BrokerOperations) SetGolEngineState(req EngineStateRequest, res *GetBoardStateResponse) (err error) {
+	fmt.Println("BrokerOperations.SetGolEngineState called")
+	g.state = req.State
+	res.Turns = g.turn
+	res.GolWorld = g.getGolWorld()
 	return
 }
 
@@ -156,16 +251,40 @@ func main() {
 	flag.Parse()
 
 	killingChannel := make(chan bool)
-	rpc.Register(&BrokerOperations{killingChannel: killingChannel})
+	brokerOps := &BrokerOperations{killingChannel: killingChannel}
+	rpc.Register(brokerOps)
 
 
 	listener, _ := net.Listen("tcp", ":"+*pAddr)
-	defer listener.Close()
 
 	go func() {
-		rpc.Accept(listener)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				// Check if the listener is closed intentionally
+				select {
+				case <-killingChannel:
+					return
+				default:
+					log.Fatal(err)
+				}
+			}
+
+			brokerOps.wg.Add(1)
+			go func() {
+				defer brokerOps.wg.Done()
+				rpc.ServeConn(conn)
+			}()
+		}
 	}()
 
-	//Waits to receive anything in the killingChannel to kill the server
-	<- killingChannel
+	fmt.Println("Broker server started on port:", *pAddr)
+
+	// Wait for the server to be signaled to stop
+	<-killingChannel
+
+	//Wait for ongoing RPC calls to complete gracefully
+	brokerOps.wg.Wait()
+
+	fmt.Println("Server gracefully stopped.")
 }

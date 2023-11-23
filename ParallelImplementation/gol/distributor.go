@@ -175,6 +175,7 @@ func timer(timesUpChan chan int) {
 //Input: c of type distributorChannels allowing function to report events
 //Input: turn of type int to allow reported events to contain correct turn number
 //Returns: world of type 2d uint8 slice containing the updated world data
+
 func calculateNextState(startY, endY, startX, endX int, data func(y, x int) uint8, c distributorChannels, turn int, p Params) [][]uint8 {
 
 	//Create future state of world
