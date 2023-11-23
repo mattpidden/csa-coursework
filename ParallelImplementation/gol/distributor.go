@@ -85,7 +85,9 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		}
 
 		//Defining the height of image for each worker
-		cuttingHeight := p.ImageHeight/p.Threads
+		//cuttingHeight := p.ImageHeight/p.Threads
+		threadRows := distributeRows(p.ImageHeight, p.Threads)
+
 
 		//Execute all turns of the Game of Life.
 		for t := 0; t < p.Turns; t++ {
@@ -108,11 +110,9 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 
 			//Assigning each goroutine, their slice of the image, and respective channel
 			for i := 0; i < p.Threads; i++ {
-				startHeight := i * cuttingHeight
-				endHeight := (i + 1) * cuttingHeight
-				if i == p.Threads-1 {
-					endHeight = p.ImageHeight
-				}
+				startHeight := threadRows[i][0]
+				endHeight := threadRows[i][1]
+
 				go worker(startHeight, endHeight, p, immutableData, c, t, channels[i])
 			}
 
@@ -146,6 +146,29 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
+}
+
+// Creating a function to distribute rows among threads
+func distributeRows(imageHeight, numThreads int) map[int][]int {
+	result := make(map[int][]int)
+	baseRows := imageHeight / numThreads
+	extraRows := imageHeight % numThreads
+	currentRow := 0
+	for i := 0; i < numThreads; i++ {
+		rows := baseRows
+		// Distribute one extra row at a time until there are none left
+		if extraRows > 0 {
+			rows++
+			extraRows--
+		}
+		// Calculate endRow for the current thread
+		endRow := currentRow + rows
+		// Store the range of rows for the current thread
+		result[i] = []int{currentRow, endRow}
+		// Update currentRow for the next thread
+		currentRow = endRow
+	}
+	return result
 }
 
 // makeImmutableMatrix takes an existing 2D matrix and wraps it in a getter closure.
