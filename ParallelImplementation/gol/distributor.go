@@ -45,9 +45,8 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			golWorld[y][x] = b
 			if b == 255 {
 				//Let the event component know which cells start alive
-				//setUpWaitGroup.Add(1)
-				//go cellFlipped(c, 0, util.Cell{X: x, Y: y}, &setUpWaitGroup)
-				c.events <- CellFlipped{CompletedTurns: 0, Cell: util.Cell{X: x, Y: y}}
+				setUpWaitGroup.Add(1)
+				go cellFlipped(c, 0, util.Cell{X: x, Y: y}, &setUpWaitGroup)
 			}
 		}
 	}
@@ -75,7 +74,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		select {
 			//Check if 2 seconds has passed - if so report alive cell count to events
 			case <-timesUp:
-				c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, immutableData))}
+				go aliveCellsCount(t, len(calculateAliveCells(p, immutableData)), c)
 			case key := <- keyPresses:
 				handleKeyPress(key, t, filename + "x" + strconv.Itoa(t), immutableData, p, c, keyPresses)
 			default:
@@ -100,10 +99,17 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 				calculateNextState(startHeight, endHeight, golWorld, editableGolWorld, c, t, p, lock)
 			}(startHeight, endHeight)
 		}
-
-		wg.Wait()
-		golWorld = editableGolWorld
 		turn++
+
+		wg.Wait() //Wait until the worker go routines have all finished updating the editable gol world
+
+		//Report the completion of each turn
+		wg.Add(1)
+		go turnComplete(turn, &wg, c)
+		wg.Wait()
+
+		golWorld = editableGolWorld
+
 	}
 
 
@@ -161,9 +167,8 @@ func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 //No return
 func timer(timesUpChan chan int) {
 	for {
-		timesUpChan <- 1
 		time.Sleep(time.Second * 2)
-
+		timesUpChan <- 1
 	}
 }
 
@@ -202,32 +207,29 @@ func calculateNextState(startY, endY int, golWorld, editableGolWorld [][]uint8, 
 				mu.Lock()
 				editableGolWorld[i][j] = 0
 				mu.Unlock()
-				//cellsFlippedWaitGroup.Add(1)
-				//go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
-				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
+				cellsFlippedWaitGroup.Add(1)
+				go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
 			} else if (golWorld[i][j] == 255) && (aliveNeighbours > 3) {     //cell dies due to overpopulation
 				mu.Lock()
 				editableGolWorld[i][j] = 0
 				mu.Unlock()
-				//cellsFlippedWaitGroup.Add(1)
-				//go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
-				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
+				cellsFlippedWaitGroup.Add(1)
+				go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
 			} else if (golWorld[i][j] == 0) && (aliveNeighbours == 3) {    		//a new cell is born
 				mu.Lock()
 				editableGolWorld[i][j] = 255
 				mu.Unlock()
-				//cellsFlippedWaitGroup.Add(1)
-				//go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
-				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
+				cellsFlippedWaitGroup.Add(1)
+				go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
 			} else {
 				//no change
 			}
 		}
 	}
 
+	//cellsFlippedWaitGroup.Add(1)
+	//go turnComplete(turn+1, &cellsFlippedWaitGroup, c)
 	cellsFlippedWaitGroup.Wait()
-	//Report the completion of each turn, but only after all the cells flipped goroutines have run
-	c.events <- TurnComplete{CompletedTurns: turn}
 }
 
 //Input: p of type Params containing data about the world
@@ -250,6 +252,7 @@ func calculateAliveCells(p Params, data func(y, x int) uint8) []util.Cell {
 	}
 	return aliveCells
 }
+
 
 func outputImage(filename string, t int, data func(y, x int) uint8, p Params, c distributorChannels) {
 	c.ioCommand <- 0
@@ -305,4 +308,13 @@ func handleKeyPress(key rune, t int, filename string, data func(y, x int) uint8,
 func cellFlipped(c distributorChannels, turn int, cell util.Cell, wg *sync.WaitGroup) {
 	defer wg.Done()
 	c.events <- CellFlipped{CompletedTurns: turn, Cell: cell}
+}
+
+func turnComplete(turn int, wg *sync.WaitGroup, c distributorChannels) {
+	defer wg.Done()
+	c.events <- TurnComplete{CompletedTurns: turn}
+}
+
+func aliveCellsCount(turn int, cellsCount int, c distributorChannels) {
+	c.events <- AliveCellsCount{CompletedTurns: turn, CellsCount: cellsCount}
 }
