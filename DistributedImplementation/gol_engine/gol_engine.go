@@ -53,19 +53,17 @@ type CellsFlippedResponse struct {
 }
 
 type HaloExchange struct {
-	above               *rpc.Client
-	below               *rpc.Client
-	distributor         *rpc.Client
-	aboveIP             string
-	belowIP             string
-	section             [][]uint8
-	HaloRegionsReceived bool
-	TopRowSent          bool
-	BottomRowSent       bool
-	GetRowLock          sync.Mutex
-	updateSection       sync.Mutex
-	AllowGetRow         bool
-	AllowGetRowChan     chan bool
+	above           *rpc.Client
+	below           *rpc.Client
+	distributor     *rpc.Client
+	aboveIP         string
+	belowIP         string
+	section         [][]uint8
+	BottomRowSent   bool
+	GetRowLock      sync.Mutex
+	updateSection   sync.Mutex
+	AllowGetRow     bool
+	AllowGetRowChan chan bool
 
 	/*allowTopHaloExchange    chan bool
 	allowBottomHaloExchange chan bool*/
@@ -88,7 +86,6 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 	(*g).AllowGetRowBottom <- true
 
 	//Initialise new 2d matrix
-
 	sourceMatrix := make([][]uint8, len((*g).section)+2)
 	for y := 0; y < len(sourceMatrix); y++ {
 		sourceMatrix[y] = make([]uint8, len((*g).section[0]))
@@ -148,17 +145,7 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 		cellsFlipped := make([]util.Cell, 0)
 		source := makeImmutableMatrix(sourceMatrix)
 
-		//DEBUG
-		//fmt.Printf("Simulate(): no. alive cells in sourceMatrix: %v\n", len(calculateAliveCells(len(sourceMatrix), len(sourceMatrix[0]), source)))
-		//END-DEBUG
-
 		calcNextState(source, &newSection, &cellsFlipped)
-
-		/*fmt.Println("Simulate(): (*g).section ")
-		outputMatrix((*g).section)
-		fmt.Println("Section(): ")
-		fmt.Println("Simulate(): newSection")
-		outputMatrix(newSection)*/
 
 		fmt.Printf("Simulate(): len(cellsFlipped): %v\n", len(cellsFlipped))
 
@@ -166,7 +153,8 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 		req := CellsFlippedRequest{CellsFlipped: cellsFlipped, Turn: turn, WorkerID: (*g).WorkerID}
 		res := CellsFlippedResponse{}
 
-		(*g).distributor.Call("Receiver.CellsFlippedMethod", req, &res)
+		err := (*g).distributor.Call("Receiver.CellsFlippedMethod", req, &res)
+		handleError(err)
 		//END-DEBUG
 		(*g).section = newSection
 		(*g).AllowGetRowTop <- true
@@ -175,6 +163,21 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 	}
 	fmt.Println("Simulate(): SIMULATION COMPLETE")
 	(*res).Section = (*g).section
+	outputMatrix((*res).Section)
+
+	//Clean up such that gol_engine is ready for next Simulate rpc call
+	err := (*g).distributor.Close()
+	handleError(err)
+	err = (*g).above.Close()
+	handleError(err)
+	err = (*g).below.Close()
+	handleError(err)
+
+	(*g).TopSent = make(chan bool, 1)
+	(*g).BottomSent = make(chan bool, 1)
+	(*g).AllowGetRowTop = make(chan bool, 1)
+	(*g).AllowGetRowChan = make(chan bool, 1)
+	(*g).AllowGetRowBottom = make(chan bool, 1)
 
 	return nil
 }
@@ -183,7 +186,7 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 //Why is the number of cells flipped so high??
 func calcNextState(source func(y, x int) uint8, newSection *[][]uint8, cellsFlipped *[]util.Cell) {
 	for Y, row := range *newSection {
-		for X, _ := range row {
+		for X := range row {
 			liveNeighbours := 0
 			//fmt.Printf("X: %v, Y: %v\n", X, Y)
 			val := source(Y+1, X)
@@ -210,9 +213,6 @@ func calcNextState(source func(y, x int) uint8, newSection *[][]uint8, cellsFlip
 			}
 
 			(*newSection)[Y][X] = determineVal(liveNeighbours, val, cellsFlipped, Y, X)
-			//DEBUG
-			//fmt.Printf("LN: %v, val %v, newSection[Y][X]: %v\n", liveNeighbours, val, (*newSection)[Y][X])
-			//END-DEBUG
 		}
 	}
 }
@@ -249,7 +249,7 @@ func (g *HaloExchange) InitialiseConnection(req InitialiseConnectionRequest, res
 	(*g).aboveIP = req.AboveIP
 	if err != nil {
 		fmt.Println("InitialiseConnection(): Error occurred whilst attempting to connect to 'above' worker ")
-		fmt.Println(err)
+		handleError(err)
 		res.UpperConnection = false
 	}
 	(*g).below, err = rpc.Dial("tcp", req.BelowIP)
@@ -257,14 +257,14 @@ func (g *HaloExchange) InitialiseConnection(req InitialiseConnectionRequest, res
 	fmt.Printf("InitialiseConnection(): g.below connected to %v\n", req.BelowIP)
 	if err != nil {
 		fmt.Println("InitialiseConnection(): Error occurred whilst attempting to connect to 'above' worker ")
-		fmt.Println(err)
+		handleError(err)
 		res.UpperConnection = false
 	}
 
 	(*g).distributor, err = rpc.Dial("tcp", req.DistributorIP)
 	if err != nil {
 		fmt.Println("InitialiseConnection(): Error occurred whilst attempting to connect to distributor ")
-		fmt.Println(err)
+		handleError(err)
 	}
 	return err
 }
@@ -325,7 +325,7 @@ func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 
 func handleError(err error) {
 	if err != nil {
-		fmt.Println(err)
+		panic(err)
 	}
 }
 
@@ -341,10 +341,16 @@ func main() {
 		AllowGetRowTop:    make(chan bool, 1),
 		AllowGetRowBottom: make(chan bool, 1),
 	}
-	rpc.Register(&g)
+	err := rpc.Register(&g)
+	handleError(err)
 
 	listener, _ := net.Listen("tcp", ":"+*pAddr)
-	defer listener.Close()
+
+	defer func() {
+		err = listener.Close()
+		handleError(err)
+	}()
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -352,6 +358,7 @@ func main() {
 		}
 		go rpc.ServeConn(conn)
 	}
+
 }
 
 //DEBUG-METHODS
