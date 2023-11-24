@@ -206,7 +206,6 @@ func beginGol(servers []*rpc.Client, sectionHeight int, golWorld [][]uint8, p Pa
 	}
 	wg.Wait()
 	fmt.Println("All workers have finished computation")
-
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
@@ -240,51 +239,6 @@ func distributor(p Params, c distributorChannels) {
 
 	//Begin gol computation
 	beginGol(servers, sectionHeight, golWorld, p)
-
-	/*y := 0
-	//Split initial world into sections of equal height and send sections to workers
-	wg := sync.WaitGroup{}
-	completeSections := make([][][]uint8, p.Threads)
-	go func() {
-		for i := 0; i < len(servers); i++ {
-			section := make([][]uint8, sectionHeight)
-			copy(section, golWorld[y:y+sectionHeight]) //Shallow copy
-			y += sectionHeight
-			request := HaloExchangeRequest{Section: section, Turns: p.Turns}
-			response := new(HaloExchangeResponse)
-			wg.Add(1)
-			go func(I int, req HaloExchangeRequest, res *HaloExchangeResponse) {
-				fmt.Printf("i: %v\n", I)
-				fmt.Println("Making HaloExchange.Simulate rpc call")
-				servers[I].Call("HaloExchange.Simulate", req, res)
-				fmt.Println("HaloExchange.Simulate rpc call response received")
-				completeSections[I] = res.Section
-				wg.Done()
-			}(i, request, response)
-		}
-		wg.Wait()
-		fmt.Println("All final sections received")
-
-		completeWorld := make([][]uint8, p.ImageHeight)
-		for y := 0; y < len(completeWorld); y++ {
-			completeWorld[y] = make([]uint8, p.ImageWidth)
-		}
-		y = 0
-		for _, section := range completeSections {
-			for _, row := range section {
-				completeWorld[y] = row
-				y++
-			}
-		}
-		//Output completeWorld as pgm file
-		c.ioCommand <- ioOutput
-		c.ioFilename <- "completeWorld"
-		for _, row := range completeWorld {
-			for _, val := range row {
-				c.ioOutput <- val
-			}
-		}
-	}()*/
 
 }
 
