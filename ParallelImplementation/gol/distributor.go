@@ -45,8 +45,9 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			golWorld[y][x] = b
 			if b == 255 {
 				//Let the event component know which cells start alive
-				setUpWaitGroup.Add(1)
-				go cellFlipped(c, 0, util.Cell{X: x, Y: y}, &setUpWaitGroup)
+				//setUpWaitGroup.Add(1)
+				//go cellFlipped(c, 0, util.Cell{X: x, Y: y}, &setUpWaitGroup)
+				c.events <- CellFlipped{CompletedTurns: 0, Cell: util.Cell{X: x, Y: y}}
 			}
 		}
 	}
@@ -67,7 +68,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 
 	//Execute all turns of the Game of Life.
 	for t := 0; t < p.Turns; t++ {
-		turn++
+
 		//Wrapping starting world in closure
 		immutableData := makeImmutableMatrix(golWorld)
 
@@ -94,17 +95,15 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			endHeight := threadRows[i][1]
 
 			wg.Add(1)
-			go func(index int) {
+			go func(startHeight, endHeight int) {
 				defer wg.Done()
 				calculateNextState(startHeight, endHeight, golWorld, editableGolWorld, c, t, p, lock)
-			}(i)
+			}(startHeight, endHeight)
 		}
 
 		wg.Wait()
 		golWorld = editableGolWorld
-
-
-
+		turn++
 	}
 
 
@@ -203,20 +202,23 @@ func calculateNextState(startY, endY int, golWorld, editableGolWorld [][]uint8, 
 				mu.Lock()
 				editableGolWorld[i][j] = 0
 				mu.Unlock()
-				cellsFlippedWaitGroup.Add(1)
-				go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
+				//cellsFlippedWaitGroup.Add(1)
+				//go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
+				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
 			} else if (golWorld[i][j] == 255) && (aliveNeighbours > 3) {     //cell dies due to overpopulation
 				mu.Lock()
 				editableGolWorld[i][j] = 0
 				mu.Unlock()
-				cellsFlippedWaitGroup.Add(1)
-				go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
+				//cellsFlippedWaitGroup.Add(1)
+				//go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
+				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
 			} else if (golWorld[i][j] == 0) && (aliveNeighbours == 3) {    		//a new cell is born
 				mu.Lock()
 				editableGolWorld[i][j] = 255
 				mu.Unlock()
-				cellsFlippedWaitGroup.Add(1)
-				go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
+				//cellsFlippedWaitGroup.Add(1)
+				//go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
+				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
 			} else {
 				//no change
 			}
