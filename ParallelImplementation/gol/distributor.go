@@ -36,6 +36,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		golWorld[y] = make([]uint8, p.ImageWidth)
 	}
 
+	var setUpWaitGroup sync.WaitGroup
 	//Loop through 2d slice initializing each cell
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
@@ -44,11 +45,12 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			golWorld[y][x] = b
 			if b == 255 {
 				//Let the event component know which cells start alive
-				c.events <- CellFlipped{CompletedTurns: 0, Cell: util.Cell{X: x, Y: y}}
+				setUpWaitGroup.Add(1)
+				go cellFlipped(c, 0, util.Cell{X: x, Y: y}, &setUpWaitGroup)
 			}
 		}
 	}
-
+	setUpWaitGroup.Wait()
 	//Initialize turns to 0
 	turn := 0
 
@@ -65,7 +67,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 
 	//Execute all turns of the Game of Life.
 	for t := 0; t < p.Turns; t++ {
-
+		turn++
 		//Wrapping starting world in closure
 		immutableData := makeImmutableMatrix(golWorld)
 
@@ -101,9 +103,8 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		wg.Wait()
 		golWorld = editableGolWorld
 
-		turn++
-		//Report the completion of each turn
-		c.events <- TurnComplete{CompletedTurns: turn}
+
+
 	}
 
 
@@ -173,7 +174,7 @@ func timer(timesUpChan chan int) {
 //Input: turn of type int to allow reported events to contain correct turn number
 //Returns: world of type 2d uint8 slice containing the updated world data
 func calculateNextState(startY, endY int, golWorld, editableGolWorld [][]uint8, c distributorChannels, turn int, p Params, mu sync.Mutex) {
-
+	var cellsFlippedWaitGroup sync.WaitGroup
 	//Loop through every cell in given range
 	for i := startY; i < endY; i++ {
 		for j := 0; j < p.ImageWidth; j++ {
@@ -202,22 +203,29 @@ func calculateNextState(startY, endY int, golWorld, editableGolWorld [][]uint8, 
 				mu.Lock()
 				editableGolWorld[i][j] = 0
 				mu.Unlock()
-				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
+				cellsFlippedWaitGroup.Add(1)
+				go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
 			} else if (golWorld[i][j] == 255) && (aliveNeighbours > 3) {     //cell dies due to overpopulation
 				mu.Lock()
 				editableGolWorld[i][j] = 0
 				mu.Unlock()
-				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
+				cellsFlippedWaitGroup.Add(1)
+				go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
 			} else if (golWorld[i][j] == 0) && (aliveNeighbours == 3) {    		//a new cell is born
 				mu.Lock()
 				editableGolWorld[i][j] = 255
 				mu.Unlock()
-				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
+				cellsFlippedWaitGroup.Add(1)
+				go cellFlipped(c, turn, util.Cell{X: j, Y: i}, &cellsFlippedWaitGroup)
 			} else {
 				//no change
 			}
 		}
 	}
+
+	cellsFlippedWaitGroup.Wait()
+	//Report the completion of each turn, but only after all the cells flipped goroutines have run
+	c.events <- TurnComplete{CompletedTurns: turn}
 }
 
 //Input: p of type Params containing data about the world
@@ -288,5 +296,11 @@ func handleKeyPress(key rune, t int, filename string, data func(y, x int) uint8,
 			}
 		}
 	}
+}
 
+// DOWN HERE ARE ALL THE FUNCTIONS FOR USE OF IO CHANNELS
+
+func cellFlipped(c distributorChannels, turn int, cell util.Cell, wg *sync.WaitGroup) {
+	defer wg.Done()
+	c.events <- CellFlipped{CompletedTurns: turn, Cell: cell}
 }
