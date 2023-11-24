@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -113,7 +112,7 @@ func (g *Receiver) CellsFlippedMethod(req CellsFlippedRequest, res *CellsFlipped
 	return nil
 }
 
-func startDistServer(server *rpc.Server, port string, channel chan<- CellsFlippedRequest, shutDownDist chan bool) {
+func startDistServer(server *rpc.Server, port string, shutDownDist chan bool) {
 	//Local channels
 	connChan := make(chan net.Conn)
 	wg := sync.WaitGroup{}
@@ -152,7 +151,8 @@ func startDistServer(server *rpc.Server, port string, channel chan<- CellsFlippe
 		case <-shutDownDist:
 			cancel()
 			//Closes listener such that no new connections are received
-			listener.Close()
+			err := listener.Close()
+			handleError(err)
 			//Waits for all rpc.ServeConn() to finish
 			wg.Wait()
 			//Let Distributor() know that distServer is shutdown
@@ -162,7 +162,7 @@ func startDistServer(server *rpc.Server, port string, channel chan<- CellsFlippe
 	}
 }
 
-func handleRequests(reqChan <-chan CellsFlippedRequest, sectionHeight int, p Params, c distributorChannels, workers int, shutDownReqHandler chan bool) {
+func handleRequests(reqChan <-chan CellsFlippedRequest, sectionHeight int, c distributorChannels, workers int, shutDownReqHandler chan bool) {
 	var req CellsFlippedRequest
 	for {
 		turn := 0
@@ -219,7 +219,8 @@ func initialiseWorkerConnections(ports []string, localHost string, distPort stri
 
 		//Blocking call
 		fmt.Println("HaloExchange.InitialiseConnection call made")
-		server.Call("HaloExchange.InitialiseConnection", request, &response)
+		err := server.Call("HaloExchange.InitialiseConnection", request, &response)
+		handleError(err)
 		fmt.Println("Rpc response received")
 
 		if response.LowerConnection && response.UpperConnection {
@@ -248,7 +249,8 @@ func beginGol(servers []*rpc.Client, sectionHeight int, golWorld [][]uint8, p Pa
 		go func(I int, req HaloExchangeRequest, res *HaloExchangeResponse) {
 			fmt.Printf("i: %v\n", I)
 			fmt.Println("Making HaloExchange.Simulate rpc call")
-			servers[I].Call("HaloExchange.Simulate", req, res)
+			err := servers[I].Call("HaloExchange.Simulate", req, res)
+			handleError(err)
 			fmt.Println("HaloExchange.Simulate rpc call response received")
 			completeSections[I] = res.Section
 			//DEBUG
@@ -274,6 +276,9 @@ func distributor(p Params, c distributorChannels) {
 
 	//VARIABLE-INIT
 	workers := 4 //Hardcoding no. workers to 4
+
+	//BENCHMARKING
+	//benchmarking := true
 
 	ports := make([]string, workers)
 	servers := make([]*rpc.Client, workers)
@@ -303,11 +308,11 @@ func distributor(p Params, c distributorChannels) {
 	handleError(err)
 
 	shutDownDist := make(chan bool)
-	go startDistServer(server, distPort, reqChan, shutDownDist)
+	go startDistServer(server, distPort, shutDownDist)
 
 	//Start go routine to handle CellsFlippedRequests
 	shutDownReqHandler := make(chan bool)
-	go handleRequests(reqChan, sectionHeight, p, c, workers, shutDownReqHandler)
+	go handleRequests(reqChan, sectionHeight, c, workers, shutDownReqHandler)
 
 	//Make connection for every worker
 	initialiseWorkerConnections(ports, localHost, distPort, servers)
@@ -319,7 +324,8 @@ func distributor(p Params, c distributorChannels) {
 	//Close all connections with workers
 	fmt.Println("Beginning clean up...")
 	for _, server := range servers {
-		server.Close()
+		err := server.Close()
+		handleError(err)
 	}
 	//Stop distServer listener
 	shutDownDist <- true
@@ -347,15 +353,6 @@ func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 	}
 }
 
-//Go routine used to send a notification every time 2 seconds has passed
-func timer(timesUpChan chan int) {
-	for {
-		timesUpChan <- 1
-		time.Sleep(time.Second * 2)
-
-	}
-}
-
 //Input: p of type Params containing data about the world
 //Input: world of type [][]uint8 containing the gol world data
 //Returns: slice containing elements of type util.Cell, of all alive cells
@@ -377,7 +374,7 @@ func calculateAliveCells(p Params, data func(y, x int) uint8) []util.Cell {
 	return aliveCells
 }
 
-//DEBUG METHODS
+/*
 func outputMatrix(matrix [][]uint8) {
 	var v string
 	for _, row := range matrix {
@@ -392,3 +389,4 @@ func outputMatrix(matrix [][]uint8) {
 		fmt.Printf("\n")
 	}
 }
+*/

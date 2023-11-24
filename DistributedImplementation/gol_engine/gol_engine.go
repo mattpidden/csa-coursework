@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
+	"os"
 	"sync"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -106,12 +107,13 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 		go func() {
 			defer wg.Done()
 			req := GetRowRequest{"bottom"}
-			res := GetRowResponse{}
+			res := new(GetRowResponse)
 			fmt.Printf("Simulate(): Requesting bottom row from 'above' worker @: %v\n", (*g).aboveIP)
-			err := (*g).above.Call("HaloExchange.GetRow", req, &res)
+			err := (*g).above.Call("HaloExchange.GetRow", req, res)
 			handleError(err)
 			fmt.Printf("Simulate(): received bottom row from 'above' worker @: %v\n", (*g).aboveIP)
-			topRow = res.Row
+			topRow = (*res).Row
+
 		}()
 
 		//Request bottom row
@@ -119,12 +121,12 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 		go func() {
 			defer wg.Done()
 			req := GetRowRequest{"top"}
-			res := GetRowResponse{}
+			res := new(GetRowResponse)
 			fmt.Printf("Simulate(): Requesting top row from 'below' worker @: %v\n", (*g).belowIP)
-			err := (*g).above.Call("HaloExchange.GetRow", req, &res)
+			err := (*g).below.Call("HaloExchange.GetRow", req, res)
 			handleError(err)
 			fmt.Printf("Simulate(): received top row from 'below' worker @: %v\n", (*g).belowIP)
-			bottomRow = res.Row
+			bottomRow = (*res).Row
 		}()
 		wg.Wait()
 
@@ -163,7 +165,6 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 	}
 	fmt.Println("Simulate(): SIMULATION COMPLETE")
 	(*res).Section = (*g).section
-	outputMatrix((*res).Section)
 
 	//Clean up such that gol_engine is ready for next Simulate rpc call
 	err := (*g).distributor.Close()
@@ -178,7 +179,6 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 	(*g).AllowGetRowTop = make(chan bool, 1)
 	(*g).AllowGetRowChan = make(chan bool, 1)
 	(*g).AllowGetRowBottom = make(chan bool, 1)
-
 	return nil
 }
 
@@ -231,13 +231,17 @@ func (g *HaloExchange) GetRow(req GetRowRequest, res *GetRowResponse) error {
 		<-(*g).AllowGetRowTop
 		(*res).Row = (*g).section[0]
 		(*g).TopSent <- true
+		return nil
 
 	} else if req.RowRequired == "bottom" {
 		<-(*g).AllowGetRowBottom
 		(*res).Row = (*g).section[len((*g).section)-1]
 		(*g).BottomSent <- true
+		return nil
 	}
 
+	fmt.Printf("GetRow: Unrecognised row required: %v \n", req.RowRequired)
+	os.Exit(1)
 	return nil
 }
 func (g *HaloExchange) InitialiseConnection(req InitialiseConnectionRequest, res *InitialiseConnectionResponse) error {
@@ -361,6 +365,7 @@ func main() {
 
 }
 
+/*
 //DEBUG-METHODS
 func outputMatrix(matrix [][]uint8) {
 	var v string
@@ -375,6 +380,7 @@ func outputMatrix(matrix [][]uint8) {
 		}
 		fmt.Printf("\n")
 	}
+	fmt.Printf("\n")
 }
-
 //END-DEBUG-METHODS
+*/
