@@ -3,6 +3,7 @@ package gol
 import (
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -18,6 +19,9 @@ type distributorChannels struct {
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
+	var lock sync.Mutex
+	var wg sync.WaitGroup
+
 	//Send command to IO, asking to run readPgmImage function
 	c.ioCommand <- 1
 
@@ -53,81 +57,55 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	//Running go routine to be flagging for updates every 2 seconds
 	go timer(timesUp)
 
-	//SINGLE THREAD IMPLEMENTATION FOR WHEN THREADS = 1
-	if p.Threads == 1 {
-		//Execute all turns of the Game of Life.
-		for t := 0; t < p.Turns; t++ {
+	//PARALLELED MULTIPLE THREAD IMPLEMENTATION MEMORY SHARING
 
-			immutableData := makeImmutableMatrix(golWorld)
+	//Defining the height of image for each worker
+	//cuttingHeight := p.ImageHeight/p.Threads
+	threadRows := distributeRows(p.ImageHeight, p.Threads)
 
-			select {
-				case <- timesUp:
-					//Check if 2 seconds has passed - if so report alive cell count to events
-					c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, immutableData))}
-				case key := <- keyPresses:
-					handleKeyPress(key, t, filename + "x" + strconv.Itoa(t), immutableData, p, c, keyPresses)
-				default:
-					//If timer not up, or not user input: do nothing :)
-			}
+	//Execute all turns of the Game of Life.
+	for t := 0; t < p.Turns; t++ {
 
-			golWorld = calculateNextState(0, p.ImageHeight, 0, p.ImageWidth, immutableData, c, t, p)
-			turn++
-			//Report the completion of each turn
-			c.events <- TurnComplete{CompletedTurns: turn}
+		//Wrapping starting world in closure
+		immutableData := makeImmutableMatrix(golWorld)
+
+		select {
+			//Check if 2 seconds has passed - if so report alive cell count to events
+			case <-timesUp:
+				c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, immutableData))}
+			case key := <- keyPresses:
+				handleKeyPress(key, t, filename + "x" + strconv.Itoa(t), immutableData, p, c, keyPresses)
+			default:
+				//If time not up, or not user input: do nothing extra
 		}
-	} else {
-		//PARALLELED MULTIPLE THREAD IMPLEMENTATION
-		//Creating slice of channels, initialized with channels, for each worker goroutine
-		channels := []chan [][]uint8{}
+
+		//Creating var to store new world data in (not this is not a reference to gol world so can be edited)
+		editableGolWorld := make([][]uint8, len(golWorld))
+		for i := range golWorld {
+			editableGolWorld[i] = make([]uint8, len(golWorld[i]))
+			copy(editableGolWorld[i], golWorld[i])
+		}
+
+		//Assigning each goroutine, their slice of the image, and respective channel
 		for i := 0; i < p.Threads; i++ {
-			newChan := make(chan [][]uint8)
-			channels = append(channels, newChan)
+			startHeight := threadRows[i][0]
+			endHeight := threadRows[i][1]
+
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				calculateNextState(startHeight, endHeight, golWorld, editableGolWorld, c, t, p, lock)
+			}(i)
 		}
 
-		//Defining the height of image for each worker
-		//cuttingHeight := p.ImageHeight/p.Threads
-		threadRows := distributeRows(p.ImageHeight, p.Threads)
+		wg.Wait()
+		golWorld = editableGolWorld
 
-
-		//Execute all turns of the Game of Life.
-		for t := 0; t < p.Turns; t++ {
-
-			//Wrapping starting world in closure
-			immutableData := makeImmutableMatrix(golWorld)
-
-			select {
-				//Check if 2 seconds has passed - if so report alive cell count to events
-				case <-timesUp:
-					c.events <- AliveCellsCount{CompletedTurns: t, CellsCount: len(calculateAliveCells(p, immutableData))}
-				case key := <- keyPresses:
-					handleKeyPress(key, t, filename + "x" + strconv.Itoa(t), immutableData, p, c, keyPresses)
-				default:
-					//If time not up, or not user input: do nothing extra
-			}
-
-			//Creating var to store new world data in
-			var newGolWorld [][]uint8
-
-			//Assigning each goroutine, their slice of the image, and respective channel
-			for i := 0; i < p.Threads; i++ {
-				startHeight := threadRows[i][0]
-				endHeight := threadRows[i][1]
-
-				go worker(startHeight, endHeight, p, immutableData, c, t, channels[i])
-			}
-
-			//Receive all data back from worker goroutines and stitch image back together
-			for i := 0; i < p.Threads; i++ {
-				newGolWorld = append(newGolWorld, <-channels[i]...)
-			}
-
-			golWorld = newGolWorld
-
-			turn++
-			//Report the completion of each turn
-			c.events <- TurnComplete{CompletedTurns: turn}
-		}
+		turn++
+		//Report the completion of each turn
+		c.events <- TurnComplete{CompletedTurns: turn}
 	}
+
 
 	immutableData := makeImmutableMatrix(golWorld)
 
@@ -178,10 +156,6 @@ func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 	}
 }
 
-func worker(startY int, endY int, p Params, data func(y, x int) uint8, c distributorChannels, turns int, outputChan chan<- [][]uint8) {
-	newPixelData := calculateNextState(startY, endY, 0, p.ImageWidth, data, c, turns, p)
-	outputChan <- newPixelData
-}
 //Used to 2 second reporting ticker
 //Input: A channel of type int
 //No return
@@ -198,13 +172,7 @@ func timer(timesUpChan chan int) {
 //Input: c of type distributorChannels allowing function to report events
 //Input: turn of type int to allow reported events to contain correct turn number
 //Returns: world of type 2d uint8 slice containing the updated world data
-func calculateNextState(startY, endY, startX, endX int, data func(y, x int) uint8, c distributorChannels, turn int, p Params) [][]uint8 {
-
-	//Create future state of world
-	future := make([][]uint8, p.ImageHeight)
-	for i := range future {
-		future[i] = make([]uint8, p.ImageWidth)
-	}
+func calculateNextState(startY, endY int, golWorld, editableGolWorld [][]uint8, c distributorChannels, turn int, p Params, mu sync.Mutex) {
 
 	//Loop through every cell in given range
 	for i := startY; i < endY; i++ {
@@ -218,36 +186,38 @@ func calculateNextState(startY, endY, startX, endX int, data func(y, x int) uint
 					x := (i + n + p.ImageHeight) % p.ImageHeight
 					y := (j + m + p.ImageWidth) % p.ImageWidth
 
-					if data(x,y) == 255 { // Checks if each neighbour cell is alive
+					if golWorld[x][y] == 255 { // Checks if each neighbour cell is alive
 						aliveNeighbours++
 					}
 				}
 			}
 
 			//Adjusts in case current cell is also alive (it would have got counted in the above calculations but is not a neighbour)
-			if data(i, j) == 255 {
+			if golWorld[i][j] == 255 {
 				aliveNeighbours -= 1
 			}
 
 			//Implement rules of life
-			if (data(i, j) == 255) && (aliveNeighbours < 2) { 			//cell is alive but lonely and dies
-				future[i][j] = 0
+			if (golWorld[i][j] == 255) && (aliveNeighbours < 2) { 			//cell is alive but lonely and dies
+				mu.Lock()
+				editableGolWorld[i][j] = 0
+				mu.Unlock()
 				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
-			} else if (data(i, j) == 255) && (aliveNeighbours > 3) {     //cell dies due to overpopulation
-				future[i][j] = 0
+			} else if (golWorld[i][j] == 255) && (aliveNeighbours > 3) {     //cell dies due to overpopulation
+				mu.Lock()
+				editableGolWorld[i][j] = 0
+				mu.Unlock()
 				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
-			} else if (data(i, j) == 0) && (aliveNeighbours == 3) {    		//a new cell is born
-				future[i][j] = 255
+			} else if (golWorld[i][j] == 0) && (aliveNeighbours == 3) {    		//a new cell is born
+				mu.Lock()
+				editableGolWorld[i][j] = 255
+				mu.Unlock()
 				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: j, Y: i}}
 			} else {
-				future[i][j] = data(i, j)									//no change
+				//no change
 			}
 		}
 	}
-	//trim future world
-	future = future[startY:endY]
-
-	return future
 }
 
 //Input: p of type Params containing data about the world
