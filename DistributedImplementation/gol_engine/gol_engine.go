@@ -190,7 +190,6 @@ func calcNextState(source func(y, x int) uint8, newSection *[][]uint8, cellsFlip
 	for Y, row := range *newSection {
 		for X := range row {
 			liveNeighbours := 0
-			//fmt.Printf("X: %v, Y: %v\n", X, Y)
 			val := source(Y+1, X)
 			//Iterate over the surrounding 8 cells
 			for y := Y - 1; y < Y-1+3; y++ {
@@ -300,8 +299,6 @@ func calculateAliveCells(imageHeight, imageWidth int, data func(y, x int) uint8)
 
 func determineVal(LN int, currentVal uint8, cellsFlipped *[]util.Cell, y, x int) uint8 {
 	//LN : LiveNeighbours
-	//If cell is alive
-	//fmt.Printf("determineVal(): LN: %v \n", LN)
 	if currentVal == 255 {
 		if LN < 2 {
 			//fmt.Println("Alive & LN < 2 : appending death to cellsFlipped")
