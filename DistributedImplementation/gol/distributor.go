@@ -62,6 +62,7 @@ type InitialiseConnectionRequest struct {
 	BelowIP       string
 	DistributorIP string
 	WorkerID      int
+	Benchmarking bool
 }
 
 // InitialiseConnectionResponse HALO-EXCHANGE
@@ -193,7 +194,7 @@ func handleError(err error) {
 		log.Fatal(err)
 	}
 }
-func initialiseWorkerConnections(ports []string, localHost string, distPort string, servers []*rpc.Client) {
+func initialiseWorkerConnections(ports []string, localHost string, distPort string, servers []*rpc.Client, b bool) {
 	var err error
 	for i, port := range ports {
 		servers[i], err = rpc.Dial("tcp", localHost+port)
@@ -213,6 +214,7 @@ func initialiseWorkerConnections(ports []string, localHost string, distPort stri
 			BelowIP:       localHost + ports[lIndex],
 			DistributorIP: localHost + distPort,
 			WorkerID:      i,
+			Benchmarking:  b,
 		}
 
 		response := new(InitialiseConnectionResponse)
@@ -247,16 +249,11 @@ func beginGol(servers []*rpc.Client, sectionHeight int, golWorld [][]uint8, p Pa
 
 		wg.Add(1)
 		go func(I int, req HaloExchangeRequest, res *HaloExchangeResponse) {
-			fmt.Printf("i: %v\n", I)
 			fmt.Println("Making HaloExchange.Simulate rpc call")
 			err := servers[I].Call("HaloExchange.Simulate", req, res)
 			handleError(err)
 			fmt.Println("HaloExchange.Simulate rpc call response received")
 			completeSections[I] = res.Section
-			//DEBUG
-			//fmt.Printf("\n\nCompleteSection[%v]\n", I)
-			//outputMatrix(completeSections[I])
-			//END-DEBUG
 			wg.Done()
 		}(i, request, response)
 	}
@@ -278,7 +275,7 @@ func distributor(p Params, c distributorChannels) {
 	workers := 4 //Hardcoding no. workers to 4
 
 	//BENCHMARKING
-	//benchmarking := true
+	benchmarking := false
 
 	ports := make([]string, workers)
 	servers := make([]*rpc.Client, workers)
@@ -315,7 +312,7 @@ func distributor(p Params, c distributorChannels) {
 	go handleRequests(reqChan, sectionHeight, c, workers, shutDownReqHandler)
 
 	//Make connection for every worker
-	initialiseWorkerConnections(ports, localHost, distPort, servers)
+	initialiseWorkerConnections(ports, localHost, distPort, servers, benchmarking)
 
 	//Begin gol computation
 	golWorld = beginGol(servers, sectionHeight, golWorld, p, workers)

@@ -27,6 +27,7 @@ type InitialiseConnectionRequest struct {
 	BelowIP       string
 	DistributorIP string
 	WorkerID      int
+	Benchmarking  bool
 }
 
 // InitialiseConnectionResponse HALO EXCHANGE STRUCT
@@ -54,26 +55,28 @@ type CellsFlippedResponse struct {
 }
 
 type HaloExchange struct {
+	//Clients
 	above           *rpc.Client
 	below           *rpc.Client
 	distributor     *rpc.Client
-	aboveIP         string
-	belowIP         string
-	section         [][]uint8
-	BottomRowSent   bool
+
 	GetRowLock      sync.Mutex
-	updateSection   sync.Mutex
 	AllowGetRow     bool
 	AllowGetRowChan chan bool
-
-	/*allowTopHaloExchange    chan bool
-	allowBottomHaloExchange chan bool*/
 	TopSent           chan bool
 	BottomSent        chan bool
 	AllowGetRowTop    chan bool
 	AllowGetRowBottom chan bool
 
+	//Section to simulate gol upon
+	section         [][]uint8
+
+	aboveIP         string
+	belowIP         string
 	WorkerID int
+
+	//Benchmarking
+	Benchmarking bool //If true then do not make CellsFlippedRequests back to distributor
 }
 
 func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeResponse) error {
@@ -149,14 +152,14 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 
 		calcNextState(source, &newSection, &cellsFlipped)
 
-		fmt.Printf("Simulate(): len(cellsFlipped): %v\n", len(cellsFlipped))
+		//If benchmarking is false make RPC call to distributor containing cellsFlipped slice
+		if !(*g).Benchmarking {
+			req := CellsFlippedRequest{CellsFlipped: cellsFlipped, Turn: turn, WorkerID: (*g).WorkerID}
+			res := CellsFlippedResponse{}
+			err := (*g).distributor.Call("Receiver.CellsFlippedMethod", req, &res)
+			handleError(err)
+		}
 
-		//Make RPC call to distributor containing cellsFlipped slice
-		req := CellsFlippedRequest{CellsFlipped: cellsFlipped, Turn: turn, WorkerID: (*g).WorkerID}
-		res := CellsFlippedResponse{}
-
-		err := (*g).distributor.Call("Receiver.CellsFlippedMethod", req, &res)
-		handleError(err)
 		//END-DEBUG
 		(*g).section = newSection
 		(*g).AllowGetRowTop <- true
@@ -182,8 +185,7 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 	return nil
 }
 
-//ISSUE PROBABLY HERE
-//Why is the number of cells flipped so high??
+
 func calcNextState(source func(y, x int) uint8, newSection *[][]uint8, cellsFlipped *[]util.Cell) {
 	for Y, row := range *newSection {
 		for X := range row {
@@ -193,18 +195,22 @@ func calcNextState(source func(y, x int) uint8, newSection *[][]uint8, cellsFlip
 			//Iterate over the surrounding 8 cells
 			for y := Y - 1; y < Y-1+3; y++ {
 				for x := X - 1; x < X-1+3; x++ {
+					//Skip central cell
 					if x == X && y == Y {
 						continue
 					}
-					//fmt.Printf("X: %v, Y: %v, x: %v, y: %v \n", X, Y, x, y)
+
+					//(x,y) -> (x,y+1) adjustment
 					sourceX := x
-					sourceY := y + 1 //(x,y) -> (x,y+1) adjustment
-					//"Wrap around" on x-axis
+					sourceY := y + 1
+
+					//"Wrap around" on x-axis but not on y-axis
 					if sourceX < 0 {
 						sourceX += len(row) //+ width
 					} else if sourceX == len(row) { //==width
 						sourceX -= len(row)
 					}
+
 					//Check if cell is alive
 					if source(sourceY, sourceX) == 255 {
 						liveNeighbours++
@@ -219,10 +225,8 @@ func calcNextState(source func(y, x int) uint8, newSection *[][]uint8, cellsFlip
 
 func (g *HaloExchange) GetRow(req GetRowRequest, res *GetRowResponse) error {
 	fmt.Printf("GetRow(): HaloExchange.GetRow: %v\n", req.RowRequired)
-	//Imperfect solution - needs work
 	(*g).GetRowLock.Lock()
 	if !(*g).AllowGetRow {
-		//Wait on chan
 		(*g).AllowGetRow = <-(*g).AllowGetRowChan
 	}
 	(*g).GetRowLock.Unlock()
@@ -244,6 +248,7 @@ func (g *HaloExchange) GetRow(req GetRowRequest, res *GetRowResponse) error {
 	os.Exit(1)
 	return nil
 }
+
 func (g *HaloExchange) InitialiseConnection(req InitialiseConnectionRequest, res *InitialiseConnectionResponse) error {
 	fmt.Println("InitialiseConnection(): HaloExchange.InitialiseConnection")
 	var err error
@@ -270,6 +275,8 @@ func (g *HaloExchange) InitialiseConnection(req InitialiseConnectionRequest, res
 		fmt.Println("InitialiseConnection(): Error occurred whilst attempting to connect to distributor ")
 		handleError(err)
 	}
+
+	(*g).Benchmarking = req.Benchmarking
 	return err
 }
 
@@ -364,23 +371,3 @@ func main() {
 	}
 
 }
-
-/*
-//DEBUG-METHODS
-func outputMatrix(matrix [][]uint8) {
-	var v string
-	for _, row := range matrix {
-		for _, val := range row {
-			if val == 255 {
-				v = " 255 "
-			} else {
-				v = "  0  "
-			}
-			fmt.Printf("%v", v)
-		}
-		fmt.Printf("\n")
-	}
-	fmt.Printf("\n")
-}
-//END-DEBUG-METHODS
-*/
