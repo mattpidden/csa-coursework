@@ -49,6 +49,7 @@ type EmptyRpcResponse struct {}
 // GOL_ENGINE REQ/RES STRUCTS
 
 type StartEngineRequest struct {
+	Threads int
 	GolWorld [][]uint8
 	ImageHeight int
 	ImageWidth int
@@ -126,7 +127,7 @@ func (g *BrokerOperations) StartGolExecution(req StartGolExecutionRequest, res *
 	g.state = Running
 
 	//A list of 4 server address, connect to each one and defer the closing of each one
-	workerAddresses := []string{"127.0.0.1:8040", "127.0.0.1:8041", "127.0.0.1:8042", "127.0.0.1:8043"}
+	workerAddresses := []string{"34.196.66.76:8030", "52.72.215.26:8030", "54.173.105.245:8030", "44.210.32.83:8030"}
 	// Declare a slice to hold the engines
 	var engines []*rpc.Client
 
@@ -181,6 +182,7 @@ func (g *BrokerOperations) StartGolExecution(req StartGolExecutionRequest, res *
 				endHeight := (index + 1) * cuttingHeight
 
 				request := StartEngineRequest{
+					Threads: req.Threads,
 					GolWorld:    newGolWorld,
 					ImageHeight: imageHeight,
 					ImageWidth:  imageWidth,

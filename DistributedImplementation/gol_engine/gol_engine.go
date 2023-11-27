@@ -26,6 +26,7 @@ type EngineStateRequest struct {
 }
 
 type StartEngineRequest struct {
+	Threads int
 	GolWorld [][]uint8
 	ImageHeight int
 	ImageWidth int
@@ -124,8 +125,11 @@ func (g *GoLOperations) getGolWorld() [][]uint8 {
 
 func (g *GoLOperations) RunParallelEngine(req StartEngineRequest, res *StartEngineResponse) (err error) {
 	fmt.Println("GoLOperations.RunParallelEngine")
-	const numberWorks = 4
+	var numberWorks = req.Threads
 	stripHeight := req.EndHeight - req.StartHeight
+	if stripHeight < numberWorks {
+		numberWorks = stripHeight
+	}
 
 	//Creating slice of channels, initialized with channels, for each worker goroutine
 	var channels []chan [][]uint8
@@ -180,7 +184,7 @@ func (g *GoLOperations) SetGolEngineState(req EngineStateRequest, res *EmptyRpcR
 }
 
 func main() {
-	pAddr := flag.String("port", "8040", "Port to listen on")
+	pAddr := flag.String("port", "8030", "Port to listen on")
 	flag.Parse()
 
 	killingChannel := make(chan bool)
