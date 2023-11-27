@@ -8,7 +8,8 @@ import (
 	"net/rpc"
 	"sync"
 )
-
+// COMMANDS
+// go run gol_engine/gol_engine.go
 const (
 	Running int = 0
 	Pausing int = 1
