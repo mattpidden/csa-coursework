@@ -269,7 +269,7 @@ func (g *HaloExchange) InitialiseConnection(req InitialiseConnectionRequest, res
 	}
 
 
-	(*g).distributor, err = rpc.Dial("tcp", DistributorIP)
+	(*g).distributor, err = rpc.Dial("tcp", req.DistributorIP)
 	if err != nil {
 		fmt.Println("InitialiseConnection(): Error occurred whilst attempting to connect to distributor ")
 		handleError(err)
