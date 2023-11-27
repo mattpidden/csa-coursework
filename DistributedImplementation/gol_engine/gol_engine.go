@@ -143,7 +143,6 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 		sourceMatrix[len(sourceMatrix)-1] = bottomRow
 
 		for y := 1; y < len(sourceMatrix)-1; y++ {
-			//sourceMatrix[y] = (*g).section[y-1]
 			copy(sourceMatrix[y], (*g).section[y-1])
 		}
 
@@ -269,7 +268,8 @@ func (g *HaloExchange) InitialiseConnection(req InitialiseConnectionRequest, res
 		res.UpperConnection = false
 	}
 
-	(*g).distributor, err = rpc.Dial("tcp", req.DistributorIP)
+
+	(*g).distributor, err = rpc.Dial("tcp", DistributorIP)
 	if err != nil {
 		fmt.Println("InitialiseConnection(): Error occurred whilst attempting to connect to distributor ")
 		handleError(err)
@@ -361,6 +361,7 @@ func main() {
 
 	for {
 		conn, err := listener.Accept()
+		fmt.Printf("conn.RemoteAddr(): %v\n", conn.RemoteAddr())
 		if err != nil {
 			fmt.Println(err)
 		}

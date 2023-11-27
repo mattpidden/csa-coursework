@@ -113,13 +113,14 @@ func (g *Receiver) CellsFlippedMethod(req CellsFlippedRequest, res *CellsFlipped
 	return nil
 }
 
-func startDistServer(server *rpc.Server, port string, shutDownDist chan bool) {
+func startDistServer(server *rpc.Server, DistributorIP string, shutDownDist chan bool) {
 	//Local channels
 	connChan := make(chan net.Conn)
 	wg := sync.WaitGroup{}
 
 	//SETUP DISTRIBUTOR SERVER
-	listener, _ := net.Listen("tcp", ":"+port)
+	listener, err := net.Listen("tcp", DistributorIP)
+	handleError(err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -194,10 +195,13 @@ func handleError(err error) {
 		log.Fatal(err)
 	}
 }
-func initialiseWorkerConnections(ports []string, localHost string, distPort string, servers []*rpc.Client, b bool) {
+func initialiseWorkerConnections(IPAddresses []string, DistributorIP string, servers []*rpc.Client, b bool) {
+	fmt.Println("initialiseWorkerConnections():")
+
 	var err error
-	for i, port := range ports {
-		servers[i], err = rpc.Dial("tcp", localHost+port)
+	for i, IPAddress := range IPAddresses {
+		fmt.Printf("initialiseWorkerConnections(): IP: %v \n", IPAddress)
+		servers[i], err = rpc.Dial("tcp", IPAddress)
 		handleError(err)
 	}
 
@@ -210,9 +214,9 @@ func initialiseWorkerConnections(ports []string, localHost string, distPort stri
 		lIndex := (i + 1) % len(servers) //lower index
 
 		request := InitialiseConnectionRequest{
-			AboveIP:       localHost + ports[uIndex],
-			BelowIP:       localHost + ports[lIndex],
-			DistributorIP: localHost + distPort,
+			AboveIP:       IPAddresses[uIndex],
+			BelowIP:       IPAddresses[lIndex],
+			DistributorIP: DistributorIP,
 			WorkerID:      i,
 			Benchmarking:  b,
 		}
@@ -277,7 +281,7 @@ func distributor(p Params, c distributorChannels) {
 	//BENCHMARKING
 	benchmarking := false
 
-	ports := make([]string, workers)
+	IPAddresses := make([]string, workers)
 	servers := make([]*rpc.Client, workers)
 	sectionHeight := p.ImageHeight / workers
 	reqChan := make(chan CellsFlippedRequest)
@@ -289,30 +293,25 @@ func distributor(p Params, c distributorChannels) {
 	handleError(err)
 
 	//Configuration for running 4 workers on local system
-	distPort := "8040"
-	ports[0] = "8050"
-	ports[1] = "8060"
-	ports[2] = "8070"
-	ports[3] = "8080"
-	localHost := "127.0.0.1:"
+	IPAddresses[0] = "52.54.247.234:8040"
+	IPAddresses[1] = "100.24.91.201:8040"
+	IPAddresses[2] = "3.225.79.228:8040"
+	IPAddresses[3] = "54.86.16.188:8040"
+	DistributorIP := "172.23.182.92:8040"
 
-	//Start distributor server
+	//Receive initial gol matrix from io
 	golWorld = initializeGolMatrix(p, c)
 
-	//Register receiver  to make RPC calls accessible
-	//err := rpc.Register(&receiver)
-
-	handleError(err)
-
+	//Start distributor server
 	shutDownDist := make(chan bool)
-	go startDistServer(server, distPort, shutDownDist)
+	go startDistServer(server, DistributorIP, shutDownDist)
 
 	//Start go routine to handle CellsFlippedRequests
 	shutDownReqHandler := make(chan bool)
 	go handleRequests(reqChan, sectionHeight, c, workers, shutDownReqHandler)
 
 	//Make connection for every worker
-	initialiseWorkerConnections(ports, localHost, distPort, servers, benchmarking)
+	initialiseWorkerConnections(IPAddresses, DistributorIP, servers, benchmarking)
 
 	//Begin gol computation
 	golWorld = beginGol(servers, sectionHeight, golWorld, p, workers)
@@ -371,19 +370,3 @@ func calculateAliveCells(p Params, data func(y, x int) uint8) []util.Cell {
 	return aliveCells
 }
 
-/*
-func outputMatrix(matrix [][]uint8) {
-	var v string
-	for _, row := range matrix {
-		for _, val := range row {
-			if val == 255 {
-				v = " 255 "
-			} else {
-				v = "  0  "
-			}
-			fmt.Printf("%v", v)
-		}
-		fmt.Printf("\n")
-	}
-}
-*/
