@@ -73,6 +73,7 @@ type HaloExchange struct {
 
 	aboveIP         string
 	belowIP         string
+	distIP          string
 	WorkerID int
 
 	//Benchmarking
@@ -340,7 +341,7 @@ func handleError(err error) {
 func main() {
 	pAddr := flag.String("port", "8030", "Port to listen on")
 	flag.Parse()
-	fmt.Printf("Main(): Listening on port %v", *pAddr)
+	fmt.Printf("Main(): Listening on port %v\n", *pAddr)
 
 	g := HaloExchange{
 		TopSent:           make(chan bool, 1),
@@ -361,7 +362,9 @@ func main() {
 
 	for {
 		conn, err := listener.Accept()
-		fmt.Printf("conn.RemoteAddr(): %v\n", conn.RemoteAddr())
+		(g).distIP, _ , _ = net.SplitHostPort(conn.RemoteAddr().String())
+		//fmt.Printf("conn.RemoteAddr(): %v\n", conn.RemoteAddr())
+		fmt.Printf("(g).DistIP: %v \n", g.distIP)
 		if err != nil {
 			fmt.Println(err)
 		}
