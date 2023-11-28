@@ -162,32 +162,28 @@ func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 //Go routine used to send a notification every time 2 seconds has passed
 
 func timer(broker *rpc.Client, latestGolWorld [][]uint8, p Params, c distributorChannels, finish chan bool) {
+	ticker := time.Tick(2 * time.Second)
+
 	for {
-		time.Sleep(time.Second * 2)
 		select {
-			case <- finish:
-				break
-		default:
+		case <-finish:
+			return // Exit the function if finish channel is closed
+		case <-ticker:
+			emptyRpcRequest := EmptyRpcRequest{}
+			boardStateResponse := new(GetBoardStateResponse)
+			broker.Call("BrokerOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
+			immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
 
+			if len(boardStateResponse.GolWorld) != 0 {
+				//report alive cell count to channel
+				c.events <- AliveCellsCount{CompletedTurns: boardStateResponse.Turns, CellsCount: len(calculateAliveCells(p, immutableData))}
+
+				//Visualise gol on sdl window
+				checkForCellFlips(makeImmutableMatrix(latestGolWorld), makeImmutableMatrix(boardStateResponse.GolWorld), boardStateResponse.Turns, p, c)
+				c.events <- TurnComplete{CompletedTurns: boardStateResponse.Turns}
+				latestGolWorld = boardStateResponse.GolWorld
+			}
 		}
-
-		emptyRpcRequest := EmptyRpcRequest{}
-		boardStateResponse := new(GetBoardStateResponse)
-		broker.Call("BrokerOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
-		immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
-
-
-		if len(boardStateResponse.GolWorld) != 0 {
-			//report alive cell count to channel
-			c.events <- AliveCellsCount{CompletedTurns: boardStateResponse.Turns, CellsCount: len(calculateAliveCells(p, immutableData))}
-			//Visualise gol on sdl window
-			checkForCellFlips(makeImmutableMatrix(latestGolWorld), immutableData, boardStateResponse.Turns, p, c)
-			c.events <- TurnComplete{CompletedTurns: boardStateResponse.Turns}
-			latestGolWorld = boardStateResponse.GolWorld
-		}
-
-
-
 	}
 }
 
