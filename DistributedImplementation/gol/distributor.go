@@ -102,7 +102,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		ImageWidth: p.ImageWidth,
 		Threads:     p.Threads,
 		//Change this variable to control if the local controller takes over a previous controllers processing on the remote engine
-		ContinuePreviousWorld: true,
+		ContinuePreviousWorld: false,
 	}
 	response := new(SingleThreadExecutionResponse)
 
