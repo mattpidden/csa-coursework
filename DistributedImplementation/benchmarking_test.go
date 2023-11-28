@@ -9,7 +9,7 @@ import (
 )
 
 // Change the following constant to change how many turns to GoL benchmark should iterate
-const benchLength = 100
+const benchLength = 1000
 
 func BenchmarkStudentVersion(b *testing.B) {
 	for threads := 1; threads <= 16; threads++ {
