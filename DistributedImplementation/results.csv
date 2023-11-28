@@ -1,0 +1,12 @@
+goos: linux
+goarch: amd64
+pkg: uk.ac.bris.cs/gameoflife
+cpu: 12th Gen Intel(R) Core(TM) i7-1255U
+,benckmarkresults.out
+,sec/op,CI
+StudentVersion/16x16x1000-1-12,0.64577947,∞
+StudentVersion/64x64x1000-1-12,1.029919719,∞
+StudentVersion/128x128x1000-1-12,2.205215625,∞
+StudentVersion/256x256x1000-1-12,5.924142808,∞
+StudentVersion/512x512x1000-1-12,18.347037102,∞
+geomean,2.7574397086012086

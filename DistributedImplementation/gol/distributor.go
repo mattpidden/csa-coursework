@@ -86,8 +86,8 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	c.events <- TurnComplete{CompletedTurns: 0}
 
 	//Take input of server:port
-	//serveradd := "18.233.91.29:8030"
-	serveradd := "127.0.0.1:8030"
+	serveradd := "18.233.91.29:8030"
+	//serveradd := "127.0.0.1:8030"
 	broker, err := rpc.Dial("tcp", serveradd)
 	if err == nil {
 		//fmt.Println("Dialed:", serveradd)
