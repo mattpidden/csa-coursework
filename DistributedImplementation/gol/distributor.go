@@ -86,8 +86,8 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	c.events <- TurnComplete{CompletedTurns: 0}
 
 	//Take input of server:port
-	//serveradd := "18.233.91.29:8030"
-	serveradd := "127.0.0.1:8030"
+	serveradd := "18.233.91.29:8030"
+	//serveradd := "127.0.0.1:8030"
 	broker, err := rpc.Dial("tcp", serveradd)
 	if err == nil {
 		//fmt.Println("Dialed:", serveradd)
@@ -160,33 +160,33 @@ func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 }
 
 //Go routine used to send a notification every time 2 seconds has passed
-
 func timer(broker *rpc.Client, latestGolWorld [][]uint8, p Params, c distributorChannels, finish chan bool) {
+	ticker := time.Tick(2 * time.Second)
+
 	for {
-		time.Sleep(time.Second * 2)
 		select {
-			case <- finish:
-				break
-		default:
+		case <-finish:
+			return // Exit the function if finish channel is closed
+		case <-ticker:
+			emptyRpcRequest := EmptyRpcRequest{}
+			boardStateResponse := new(GetBoardStateResponse)
+			broker.Call("BrokerOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
+			immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
 
-		}
+			if len(boardStateResponse.GolWorld) != 0 {
+				//report alive cell count to channel
+				c.events <- AliveCellsCount{CompletedTurns: boardStateResponse.Turns, CellsCount: len(calculateAliveCells(p, immutableData))}
 
-		emptyRpcRequest := EmptyRpcRequest{}
-		boardStateResponse := new(GetBoardStateResponse)
-		broker.Call("BrokerOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
-		immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
-
-		if len(boardStateResponse.GolWorld) != 0 {
-			//report alive cell count to channel
-			c.events <- AliveCellsCount{CompletedTurns: boardStateResponse.Turns, CellsCount: len(calculateAliveCells(p, immutableData))}
-
-			//Visualise gol on sdl window
-			checkForCellFlips(makeImmutableMatrix(latestGolWorld), makeImmutableMatrix(boardStateResponse.GolWorld), boardStateResponse.Turns, p, c)
-			c.events <- TurnComplete{CompletedTurns: boardStateResponse.Turns}
-			latestGolWorld = boardStateResponse.GolWorld
+				//Visualise gol on sdl window
+				checkForCellFlips(makeImmutableMatrix(latestGolWorld), makeImmutableMatrix(boardStateResponse.GolWorld), boardStateResponse.Turns, p, c)
+				c.events <- TurnComplete{CompletedTurns: boardStateResponse.Turns}
+				latestGolWorld = boardStateResponse.GolWorld
+			}
 		}
 	}
 }
+
+
 
 func checkForCellFlips(oldGolWorld func(y, x int) uint8, newWorld func(y, x int) uint8, turn int, p Params, c distributorChannels) {
 	for i := 0; i < p.ImageHeight; i++ {
