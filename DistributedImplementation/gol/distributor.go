@@ -176,13 +176,15 @@ func timer(broker *rpc.Client, latestGolWorld [][]uint8, p Params, c distributor
 		broker.Call("BrokerOperations.GetBoardState", emptyRpcRequest, boardStateResponse)
 		immutableData := makeImmutableMatrix(boardStateResponse.GolWorld)
 
-		//report alive cell count to channel
-		c.events <- AliveCellsCount{CompletedTurns: boardStateResponse.Turns, CellsCount: len(calculateAliveCells(p, immutableData))}
+		if len(boardStateResponse.GolWorld) != 0 {
+			//report alive cell count to channel
+			c.events <- AliveCellsCount{CompletedTurns: boardStateResponse.Turns, CellsCount: len(calculateAliveCells(p, immutableData))}
 
-		//Visualise gol on sdl window
-		checkForCellFlips(makeImmutableMatrix(latestGolWorld), makeImmutableMatrix(boardStateResponse.GolWorld), boardStateResponse.Turns, p, c)
-		c.events <- TurnComplete{CompletedTurns: boardStateResponse.Turns}
-		latestGolWorld = boardStateResponse.GolWorld
+			//Visualise gol on sdl window
+			checkForCellFlips(makeImmutableMatrix(latestGolWorld), makeImmutableMatrix(boardStateResponse.GolWorld), boardStateResponse.Turns, p, c)
+			c.events <- TurnComplete{CompletedTurns: boardStateResponse.Turns}
+			latestGolWorld = boardStateResponse.GolWorld
+		}
 	}
 }
 
