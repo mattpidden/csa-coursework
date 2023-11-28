@@ -23,17 +23,14 @@ type HaloExchangeResponse struct {
 
 // InitialiseConnectionRequest HALO EXCHANGE STRUCT
 type InitialiseConnectionRequest struct {
-	AboveIP       string
-	BelowIP       string
-	DistributorIP string
-	WorkerID      int
-	Benchmarking  bool
+	AboveIP      string
+	BelowIP      string
+	WorkerID     int
+	Benchmarking bool
 }
 
 // InitialiseConnectionResponse HALO EXCHANGE STRUCT
 type InitialiseConnectionResponse struct {
-	UpperConnection bool
-	LowerConnection bool
 }
 
 // GetRowRequest HALO-EXCHANGE
@@ -46,34 +43,26 @@ type GetRowResponse struct {
 	Row []uint8
 }
 
-type CellsFlippedRequest struct {
-	CellsFlipped []util.Cell
-	WorkerID     int
-	Turn         int
-}
-type CellsFlippedResponse struct {
-}
-
 type HaloExchange struct {
 	//Clients
-	above           *rpc.Client
-	below           *rpc.Client
-	distributor     *rpc.Client
+	above       *rpc.Client
+	below       *rpc.Client
+	distributor *rpc.Client
 
-	GetRowLock      sync.Mutex
-	AllowGetRow     bool
-	AllowGetRowChan chan bool
+	GetRowLock        sync.Mutex
+	AllowGetRow       bool
+	AllowGetRowChan   chan bool
 	TopSent           chan bool
 	BottomSent        chan bool
 	AllowGetRowTop    chan bool
 	AllowGetRowBottom chan bool
 
 	//Section to simulate gol upon
-	section         [][]uint8
+	section [][]uint8
 
-	aboveIP         string
-	belowIP         string
-	distIP          string
+	aboveIP  string
+	belowIP  string
+	distIP   string
 	WorkerID int
 
 	//Benchmarking
@@ -144,7 +133,6 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 		sourceMatrix[len(sourceMatrix)-1] = bottomRow
 
 		for y := 1; y < len(sourceMatrix)-1; y++ {
-			//sourceMatrix[y] = (*g).section[y-1]
 			copy(sourceMatrix[y], (*g).section[y-1])
 		}
 
@@ -153,15 +141,6 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 
 		calcNextState(source, &newSection, &cellsFlipped)
 
-		//If benchmarking is false make RPC call to distributor containing cellsFlipped slice
-		if !(*g).Benchmarking {
-			req := CellsFlippedRequest{CellsFlipped: cellsFlipped, Turn: turn, WorkerID: (*g).WorkerID}
-			res := CellsFlippedResponse{}
-			err := (*g).distributor.Call("Receiver.CellsFlippedMethod", req, &res)
-			handleError(err)
-		}
-
-		//END-DEBUG
 		(*g).section = newSection
 		(*g).AllowGetRowTop <- true
 		(*g).AllowGetRowBottom <- true
@@ -171,9 +150,7 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 	(*res).Section = (*g).section
 
 	//Clean up such that gol_engine is ready for next Simulate rpc call
-	err := (*g).distributor.Close()
-	handleError(err)
-	err = (*g).above.Close()
+	err := (*g).above.Close()
 	handleError(err)
 	err = (*g).below.Close()
 	handleError(err)
@@ -185,7 +162,6 @@ func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeRespon
 	(*g).AllowGetRowBottom = make(chan bool, 1)
 	return nil
 }
-
 
 func calcNextState(source func(y, x int) uint8, newSection *[][]uint8, cellsFlipped *[]util.Cell) {
 	for Y, row := range *newSection {
@@ -252,50 +228,26 @@ func (g *HaloExchange) GetRow(req GetRowRequest, res *GetRowResponse) error {
 func (g *HaloExchange) InitialiseConnection(req InitialiseConnectionRequest, res *InitialiseConnectionResponse) error {
 	fmt.Println("InitialiseConnection(): HaloExchange.InitialiseConnection")
 	var err error
-	fmt.Printf("InitialiseConnection(): g.above connected to %v\n", req.AboveIP)
+
 	(*g).WorkerID = req.WorkerID
 	(*g).above, err = rpc.Dial("tcp", req.AboveIP)
 	(*g).aboveIP = req.AboveIP
 	if err != nil {
 		fmt.Println("InitialiseConnection(): Error occurred whilst attempting to connect to 'above' worker ")
 		handleError(err)
-		res.UpperConnection = false
 	}
+	fmt.Printf("InitialiseConnection(): g.above connected to %v\n", req.AboveIP)
+
 	(*g).below, err = rpc.Dial("tcp", req.BelowIP)
 	(*g).belowIP = req.BelowIP
-	fmt.Printf("InitialiseConnection(): g.below connected to %v\n", req.BelowIP)
 	if err != nil {
 		fmt.Println("InitialiseConnection(): Error occurred whilst attempting to connect to 'above' worker ")
 		handleError(err)
-		res.UpperConnection = false
 	}
-
-	(*g).distributor, err = rpc.Dial("tcp", req.DistributorIP)
-	if err != nil {
-		fmt.Println("InitialiseConnection(): Error occurred whilst attempting to connect to distributor ")
-		handleError(err)
-	}
+	fmt.Printf("InitialiseConnection(): g.below connected to %v\n", req.BelowIP)
 
 	(*g).Benchmarking = req.Benchmarking
 	return err
-}
-
-func calculateAliveCells(imageHeight, imageWidth int, data func(y, x int) uint8) []util.Cell {
-	var aliveCells []util.Cell
-	//Loops through entire GoL world
-	for i := 0; i < imageHeight; i++ {
-		for j := 0; j < imageWidth; j++ {
-			//If cell is alive, create cell and append to slice
-			if data(i, j) == 255 {
-				newCell := util.Cell{
-					X: j,
-					Y: i,
-				}
-				aliveCells = append(aliveCells, newCell)
-			}
-		}
-	}
-	return aliveCells
 }
 
 func determineVal(LN int, currentVal uint8, cellsFlipped *[]util.Cell, y, x int) uint8 {
@@ -339,7 +291,7 @@ func handleError(err error) {
 }
 
 func main() {
-	pAddr := flag.String("port", "8030", "Port to listen on")
+	pAddr := flag.String("port", "8040", "Port to listen on")
 	flag.Parse()
 	fmt.Printf("Main(): Listening on port %v\n", *pAddr)
 
@@ -362,12 +314,6 @@ func main() {
 
 	for {
 		conn, err := listener.Accept()
-<<<<<<< HEAD
-		(g).distIP, _ , _ = net.SplitHostPort(conn.RemoteAddr().String())
-		//fmt.Printf("conn.RemoteAddr(): %v\n", conn.RemoteAddr())
-		fmt.Printf("(g).DistIP: %v \n", g.distIP)
-=======
->>>>>>> parent of acf2cbf (Changes being made for AWS)
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -375,3 +321,22 @@ func main() {
 	}
 
 }
+
+/*
+func calculateAliveCells(imageHeight, imageWidth int, data func(y, x int) uint8) []util.Cell {
+	var aliveCells []util.Cell
+	//Loops through entire GoL world
+	for i := 0; i < imageHeight; i++ {
+		for j := 0; j < imageWidth; j++ {
+			//If cell is alive, create cell and append to slice
+			if data(i, j) == 255 {
+				newCell := util.Cell{
+					X: j,
+					Y: i,
+				}
+				aliveCells = append(aliveCells, newCell)
+			}
+		}
+	}
+	return aliveCells
+}*/
