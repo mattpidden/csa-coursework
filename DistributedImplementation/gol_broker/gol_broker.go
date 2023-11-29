@@ -65,7 +65,7 @@ func (b *Broker) BeginSimulation(req BeginGolReq, res *BeginGolRes) error {
 
 	workerIPs[0] = "100.24.91.201:8040"
 	workerIPs[1] = "3.225.79.228:8040"
-	workerIPs[2] = "52.54.247.23:80404"
+	workerIPs[2] = "52.54.247.23:8040"
 	workerIPs[3] = "54.86.16.188:8040"
 
 	//Initialise connections between workers and broker, and workers and their respective neighbours
