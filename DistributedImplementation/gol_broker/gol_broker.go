@@ -63,11 +63,18 @@ func (b *Broker) BeginSimulation(req BeginGolReq, res *BeginGolRes) error {
 	servers := make([]*rpc.Client, numWorkers)
 	workerIPs := make([]string, numWorkers)
 
-	workerIPs[0] = "100.24.91.201:8040"
-	workerIPs[1] = "3.225.79.228:8040"
-	workerIPs[2] = "52.54.247.23:8040"
-	workerIPs[3] = "54.86.16.188:8040"
+	/*
+		workerIPs[0] = "100.24.91.201:8040"
+		workerIPs[1] = "3.225.79.228:8040"
+		workerIPs[2] = "52.54.247.23:8040"
+		workerIPs[3] = "54.86.16.188:8040"
+	*/
 
+	//Private IP addresses
+	workerIPs[0] = "172.31.34.110:8040"
+	workerIPs[1] = "172.31.44.175:8040"
+	workerIPs[2] = "172.31.42.1:8040"
+	workerIPs[3] = "172.31.35.38:8040"
 	//Initialise connections between workers and broker, and workers and their respective neighbours
 	initialiseWorkerConnections(workerIPs, servers, benchmarking)
 
