@@ -71,7 +71,6 @@ func (b *Broker) BeginSimulation(req BeginGolReq, res *BeginGolRes) error {
 	height := len(world)
 	sectionHeight := height / numWorkers
 
-	//Private IP addresses
 	//Initialise connections between workers and broker, and workers and their respective neighbours
 	initialiseWorkerConnections(b.WorkerIPs, (*b).WorkerClients, benchmarking)
 
@@ -187,8 +186,6 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 func main() {
 	pAddr := flag.String("port", "8040", "Port to listen on")
 	flag.Parse()
-	fmt.Printf("Main(): Listening on port %v\n", *pAddr)
-
 	numWorkers := 4
 	workerIPs := make([]string, numWorkers)
 	workerClients := make([]*rpc.Client, numWorkers)
@@ -217,6 +214,7 @@ func main() {
 	//Start server such that broker can take rpc calls from the Local Controller
 	wg.Add(1)
 	go func() {
+		fmt.Printf("Main(): Listening on port %v\n", *pAddr)
 		listener, err := net.Listen("tcp", ":"+*pAddr)
 		handleError(err)
 
@@ -234,6 +232,8 @@ func main() {
 	wg.Add(1)
 	//Start second server for taking
 	go func() {
+		fmt.Printf("Main(): Listening on port 8050\n")
+
 		listener, err := net.Listen("tcp", ":8050")
 		handleError(err)
 
