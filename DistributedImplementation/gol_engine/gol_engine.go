@@ -43,13 +43,7 @@ type GetRowResponse struct {
 	Row []uint8
 }
 
-type GetSnapshotSectionRequest struct {
-}
-type GetSnapshotSectionResponse struct {
-	section [][]uint8
-}
-
-type Worker struct {
+type HaloExchange struct {
 	//Clients
 	above       *rpc.Client
 	below       *rpc.Client
@@ -64,8 +58,7 @@ type Worker struct {
 	AllowGetRowBottom chan bool
 
 	//Section to simulate gol upon
-	sectionMutex sync.Mutex
-	section      [][]uint8
+	section [][]uint8
 
 	aboveIP  string
 	belowIP  string
@@ -76,16 +69,8 @@ type Worker struct {
 	Benchmarking bool //If true then do not make CellsFlippedRequests back to distributor
 }
 
-func (g *Worker) GetSnapshotSection(req GetSnapshotSectionRequest, res *GetSnapshotSectionResponse) error {
-	fmt.Println("GetSnapshotSection(): Worker.GetSnapShotSection")
-	g.sectionMutex.Lock()
-	res.section = g.section
-	g.sectionMutex.Unlock()
-	return nil
-}
-
-func (g *Worker) Simulate(req HaloExchangeRequest, res *HaloExchangeResponse) error {
-	fmt.Println("Simulate(): Worker.Simulate")
+func (g *HaloExchange) Simulate(req HaloExchangeRequest, res *HaloExchangeResponse) error {
+	fmt.Println("Simulate(): HaloExchange.Simulate")
 	(*g).section = req.Section
 	wg := sync.WaitGroup{}
 
@@ -117,7 +102,7 @@ func (g *Worker) Simulate(req HaloExchangeRequest, res *HaloExchangeResponse) er
 			req := GetRowRequest{"bottom"}
 			res := new(GetRowResponse)
 			fmt.Printf("Simulate(): Requesting bottom row from 'above' worker @: %v\n", (*g).aboveIP)
-			err := (*g).above.Call("Worker.GetRow", req, res)
+			err := (*g).above.Call("HaloExchange.GetRow", req, res)
 			handleError(err)
 			fmt.Printf("Simulate(): received bottom row from 'above' worker @: %v\n", (*g).aboveIP)
 			topRow = (*res).Row
@@ -131,7 +116,7 @@ func (g *Worker) Simulate(req HaloExchangeRequest, res *HaloExchangeResponse) er
 			req := GetRowRequest{"top"}
 			res := new(GetRowResponse)
 			fmt.Printf("Simulate(): Requesting top row from 'below' worker @: %v\n", (*g).belowIP)
-			err := (*g).below.Call("Worker.GetRow", req, res)
+			err := (*g).below.Call("HaloExchange.GetRow", req, res)
 			handleError(err)
 			fmt.Printf("Simulate(): received top row from 'below' worker @: %v\n", (*g).belowIP)
 			bottomRow = (*res).Row
@@ -156,9 +141,7 @@ func (g *Worker) Simulate(req HaloExchangeRequest, res *HaloExchangeResponse) er
 
 		calcNextState(source, &newSection, &cellsFlipped)
 
-		g.sectionMutex.Lock()
 		(*g).section = newSection
-		g.sectionMutex.Unlock()
 		(*g).AllowGetRowTop <- true
 		(*g).AllowGetRowBottom <- true
 
@@ -216,8 +199,8 @@ func calcNextState(source func(y, x int) uint8, newSection *[][]uint8, cellsFlip
 	}
 }
 
-func (g *Worker) GetRow(req GetRowRequest, res *GetRowResponse) error {
-	fmt.Printf("GetRow(): Worker.GetRow: %v\n", req.RowRequired)
+func (g *HaloExchange) GetRow(req GetRowRequest, res *GetRowResponse) error {
+	fmt.Printf("GetRow(): HaloExchange.GetRow: %v\n", req.RowRequired)
 	(*g).GetRowLock.Lock()
 	if !(*g).AllowGetRow {
 		(*g).AllowGetRow = <-(*g).AllowGetRowChan
@@ -242,8 +225,8 @@ func (g *Worker) GetRow(req GetRowRequest, res *GetRowResponse) error {
 	return nil
 }
 
-func (g *Worker) InitialiseConnection(req InitialiseConnectionRequest, res *InitialiseConnectionResponse) error {
-	fmt.Println("InitialiseConnection(): Worker.InitialiseConnection")
+func (g *HaloExchange) InitialiseConnection(req InitialiseConnectionRequest, res *InitialiseConnectionResponse) error {
+	fmt.Println("InitialiseConnection(): HaloExchange.InitialiseConnection")
 	var err error
 
 	(*g).WorkerID = req.WorkerID
@@ -312,7 +295,7 @@ func main() {
 	flag.Parse()
 	fmt.Printf("Main(): Listening on port %v\n", *pAddr)
 
-	g := Worker{
+	g := HaloExchange{
 		TopSent:           make(chan bool, 1),
 		BottomSent:        make(chan bool, 1),
 		AllowGetRowChan:   make(chan bool, 1),

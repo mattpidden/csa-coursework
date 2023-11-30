@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/rpc"
 	"strconv"
-	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -26,12 +25,6 @@ type BeginGolReq struct {
 type BeginGolRes struct {
 	FinishedWorld  [][]uint8
 	CompletedTurns int
-}
-
-type GetSnapShotRequest struct {
-}
-type GetSnapShotResponse struct {
-	matrix [][]uint8
 }
 
 func initializeGolMatrix(p Params, c distributorChannels) [][]uint8 {
@@ -56,13 +49,14 @@ func initializeGolMatrix(p Params, c distributorChannels) [][]uint8 {
 			}
 		}
 	}
-	c.events <- TurnComplete{CompletedTurns: 0}
 	return golWorld
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 	fmt.Println("Distributor(): ")
+
+	//BENCHMARKING
 	var golWorld [][]uint8
 
 	//Get image data from io
@@ -79,25 +73,13 @@ func distributor(p Params, c distributorChannels) {
 		Turns: p.Turns,
 	}
 	res := BeginGolRes{}
+	broker.Call("Broker.BeginSimulation", req, &res) //Blocking rpc call
 
-	//Begin simulation
-	err = broker.Call("Broker.BeginSimulation", req, &res) //Blocking rpc call
-	handleError(err)
-
-	//Start Snapshot Graphics requests
-	shutDownChan := make(chan bool)
-	go Graphics(c, shutDownChan, broker, golWorld)
-
-	//Get finished world
 	golWorld = res.FinishedWorld
 
 	//Clean up before next distributor call
 	fmt.Println("Beginning clean up...")
 
-	//Shutdown Graphics
-	shutDownChan <- true
-
-	//Report FinalTurnComplete
 	aliveCells := calculateAliveCells(p, makeImmutableMatrix(golWorld))
 	c.events <- FinalTurnComplete{CompletedTurns: p.Turns, Alive: aliveCells}
 
@@ -107,49 +89,9 @@ func distributor(p Params, c distributorChannels) {
 	c.events <- StateChange{p.Turns, Quitting}
 	close(c.events)
 
-	err = broker.Close()
-	handleError(err)
+	broker.Close()
 	fmt.Println("Clean up done...")
-}
 
-func Graphics(c distributorChannels, shutDownChan chan bool, broker *rpc.Client, world [][]uint8) {
-	ticker := time.NewTicker(1 * time.Second)
-
-	//Make copy such that no underlying slices are shared
-	currentWorld := make([][]uint8, len(world))
-	for y := 0; y < len(world); y++ {
-		currentWorld[0] = make([]uint8, len(world[0]))
-		copy(currentWorld[0], world[0])
-	}
-
-	turn := 0
-
-	for {
-		select {
-		case <-ticker.C:
-			turn++
-
-			//send getSnapshotRequest
-			req := GetSnapShotRequest{}
-			res := GetSnapShotResponse{}
-			//Blocking
-			err := broker.Call("Broker.GetSnapshot", req, &res)
-			handleError(err)
-			//Determine what cells to flip
-			for y, row := range currentWorld {
-				for x, val := range row {
-					if val != res.matrix[y][x] {
-						c.events <- CellFlipped{CompletedTurns: 0, Cell: util.Cell{X: x, Y: y}}
-					}
-				}
-			}
-			c.events <- TurnComplete{CompletedTurns: turn}
-			currentWorld = res.matrix
-
-		case <-shutDownChan:
-			return
-		}
-	}
 }
 
 // makeImmutableMatrix takes an existing 2D matrix and wraps it in a getter closure.
