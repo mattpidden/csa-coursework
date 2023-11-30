@@ -215,11 +215,10 @@ func main() {
 	wg.Add(1)
 	go func() {
 		fmt.Printf("Main(): Listening on port %v\n", *pAddr)
-		listener, err := net.Listen("tcp", ":"+*pAddr)
+		listener1, err := net.Listen("tcp", ":"+*pAddr)
 		handleError(err)
-
 		for {
-			conn, err := listener.Accept()
+			conn, err := listener1.Accept()
 			fmt.Println("Accepted connection on port :8040")
 			if err != nil {
 				fmt.Println(err)
@@ -233,12 +232,11 @@ func main() {
 	//Start second server for taking
 	go func() {
 		fmt.Printf("Main(): Listening on port 8050\n")
-
-		listener, err := net.Listen("tcp", ":8050")
+		listener2, err := net.Listen("tcp", ":8050")
 		handleError(err)
 
 		for {
-			conn, err := listener.Accept()
+			conn, err := listener2.Accept()
 			fmt.Println("Accepted connection on port :8050")
 
 			if err != nil {
