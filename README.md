@@ -49,7 +49,7 @@
 - In this stage, we need to create an implementation that uses AWS nodes to calculate the new states of the GOL board, with communication between machines over a network.
 - Note view the offical readme for help updating a test file.
 - [Offical GitHub page found here](https://github.com/UoB-CSA/gol-skeleton)
-- **Step 1**
+- **Step 1 - DONE**
   - Start with a working single-threaded, single machine implementation (Step 1 of parallel imp).
   - Seperate this implementation into 2 components:
     - A local controller that will handle IO and capturing keypresses from the sdl window, run on a local machine.
@@ -57,19 +57,20 @@
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/blob/master/content/cw_diagrams-Distributed_1.png)
   - The starting point for this is the local controller telling the Gol Engine to evolve the board, using a single blocking RPC call.
   - Test your implementation using `go test -v -run=TestGol/-1$` on the local controller.
-- **Step 2**
+- **Step 2 - DONE**
   - Get the Gol Engine to report the number of cells alive every 2 seconds to the local controller
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/blob/master/content/cw_diagrams-Distributed_2.png)
   - To do this, run a ticker on the local controller, and make an RPC call to the AWS node / worker / broker every 2 seconds. Once received the alive cell count, the local controller should sent that down the `events` channel as an `AliveCellsCount` event.
   - Test your implementation using `go test -v -run=TestAlive` on the local controller.
-- **Step 3**
+- **Step 3 - DONE**
   - Get the local controller to output the state of the board after all turns have been completed as a PGM image.
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/blob/master/content/cw_diagrams-Distributed_3.png)
   - Test your implementation using `go test -v -run=TestPgm/-1$` on the local controller.
-- **Step 4**
+- **Step 4 - DONE**
   - Add more functionality to the local controller, allowing it to control the Gol Engine as follows:
     - If `s` is pressed, the controller should generate a PGM file with the current state of the board.
     - If `q` is pressed, close the controller client program without causing an error on the GoL server. A new controller should be able to take over interaction with the GoL engine. Note that you are free to define the nature of how a new controller can take over interaction. Most likely the state will be reset. If you do manage to continue with the previous world this would be considered an extension and a form of fault tolerance.
+      - We have done the extension. To decide weather to continue the last world's computation, or begin new computation, a variable in the request is used. 
     - If `k` is pressed, all components of the distributed system are shut down cleanly, and the system outputs a PGM image of the latest state.
     - If `p` is pressed, pause the processing *on the AWS node* and have the *controller* print the current turn that is being processed. If `p` is pressed again resume the processing and have the controller print `"Continuing"`. It is *not* necessary for `q` and `s` to work while the execution is paused.
   - View model diagram [here](https://github.com/UoB-CSA/gol-skeleton/blob/master/content/cw_diagrams-Distributed_4.png)
