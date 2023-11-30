@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/rpc"
 	"strconv"
+	"sync"
 	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -67,6 +68,7 @@ func distributor(p Params, c distributorChannels) {
 
 	//Get image data from io
 	golWorld = initializeGolMatrix(p, c)
+	shutDownChan := make(chan bool)
 
 	//Make connection with broker
 	brokerIP := "54.175.85.139:8040"
@@ -81,12 +83,20 @@ func distributor(p Params, c distributorChannels) {
 	res := BeginGolRes{}
 
 	//Begin simulation
-	err = broker.Call("Broker.BeginSimulation", req, &res) //Blocking rpc call
-	handleError(err)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		err = broker.Call("Broker.BeginSimulation", req, &res) //Blocking rpc call
+		handleError(err)
+		shutDownChan <- true //ShutDown Graphics
+		wg.Done()
+	}()
 
 	//Start Snapshot Graphics requests
-	shutDownChan := make(chan bool)
-	go Graphics(c, shutDownChan, broker, golWorld)
+	//wg.Add(1)
+	//go Graphics(c, shutDownChan, broker, golWorld, wg)
+
+	wg.Wait()
 
 	//Get finished world
 	golWorld = res.FinishedWorld
@@ -112,7 +122,11 @@ func distributor(p Params, c distributorChannels) {
 	fmt.Println("Clean up done...")
 }
 
-func Graphics(c distributorChannels, shutDownChan chan bool, broker *rpc.Client, world [][]uint8) {
+func Graphics(c distributorChannels, shutDownChan chan bool, broker *rpc.Client, world [][]uint8, wg sync.WaitGroup) {
+	fmt.Println("Graphics():")
+
+	defer wg.Done()
+
 	ticker := time.NewTicker(1 * time.Second)
 
 	//Make copy such that no underlying slices are shared
@@ -127,6 +141,7 @@ func Graphics(c distributorChannels, shutDownChan chan bool, broker *rpc.Client,
 	for {
 		select {
 		case <-ticker.C:
+			fmt.Println("Sending GetSnapShotRequest()")
 			turn++
 
 			//send getSnapshotRequest
@@ -147,6 +162,7 @@ func Graphics(c distributorChannels, shutDownChan chan bool, broker *rpc.Client,
 			currentWorld = res.matrix
 
 		case <-shutDownChan:
+
 			return
 		}
 	}

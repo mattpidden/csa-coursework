@@ -338,22 +338,3 @@ func main() {
 	}
 
 }
-
-/*
-func calculateAliveCells(imageHeight, imageWidth int, data func(y, x int) uint8) []util.Cell {
-	var aliveCells []util.Cell
-	//Loops through entire GoL world
-	for i := 0; i < imageHeight; i++ {
-		for j := 0; j < imageWidth; j++ {
-			//If cell is alive, create cell and append to slice
-			if data(i, j) == 255 {
-				newCell := util.Cell{
-					X: j,
-					Y: i,
-				}
-				aliveCells = append(aliveCells, newCell)
-			}
-		}
-	}
-	return aliveCells
-}*/

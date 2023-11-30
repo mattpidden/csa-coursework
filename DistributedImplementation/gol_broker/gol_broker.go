@@ -154,6 +154,7 @@ func initialiseWorkerConnections(IPs []string, workerClients []*rpc.Client, benc
 }
 
 func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) error {
+	fmt.Println("Broker.GetSnapshot()")
 	//Make GetSnapshotSectionReq to all workers
 	wg := sync.WaitGroup{}
 	sections := make([][][]uint8, len((*b).WorkerClients))
