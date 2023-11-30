@@ -166,7 +166,8 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 		go func(Client *rpc.Client, I int) {
 			req := GetSnapshotSectionRequest{}
 			res := GetSnapshotSectionResponse{}
-			Client.Call("Worker.GetSnapshotSection", req, &res)
+			err := Client.Call("Worker.GetSnapshotSection", req, &res)
+			handleError(err)
 			sections[I] = res.section
 			wg.Done()
 		}(client, i)

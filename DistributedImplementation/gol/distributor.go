@@ -93,8 +93,8 @@ func distributor(p Params, c distributorChannels) {
 	}()
 
 	//Start Snapshot Graphics requests
-	//wg.Add(1)
-	//go Graphics(c, shutDownChan, broker, golWorld, wg)
+	wg.Add(1)
+	go Graphics(c, shutDownChan, broker, golWorld, wg)
 
 	wg.Wait()
 
