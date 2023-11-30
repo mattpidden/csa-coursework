@@ -213,19 +213,42 @@ func main() {
 	err := rpc.Register(&broker)
 	handleError(err)
 
+	wg := sync.WaitGroup{}
 	//Start server such that broker can take rpc calls from the Local Controller
-	listener, err := net.Listen("tcp", ":"+*pAddr)
-	handleError(err)
+	wg.Add(1)
+	go func() {
+		listener, err := net.Listen("tcp", ":"+*pAddr)
+		handleError(err)
 
-	for {
-		conn, err := listener.Accept()
+		for {
+			conn, err := listener.Accept()
 
-		if err != nil {
-			fmt.Println(err)
+			if err != nil {
+				fmt.Println(err)
+			}
+			go rpc.ServeConn(conn)
 		}
-		go rpc.ServeConn(conn)
-	}
+		wg.Done()
+	}()
 
+	wg.Add(1)
+	//Start second server for taking
+	go func() {
+		listener, err := net.Listen("tcp", ":8050")
+		handleError(err)
+
+		for {
+			conn, err := listener.Accept()
+
+			if err != nil {
+				fmt.Println(err)
+			}
+			go rpc.ServeConn(conn)
+		}
+		wg.Done()
+	}()
+
+	wg.Wait()
 }
 
 func handleError(err error) {

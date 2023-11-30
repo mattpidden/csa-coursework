@@ -75,6 +75,11 @@ func distributor(p Params, c distributorChannels) {
 	broker, err := rpc.Dial("tcp", brokerIP)
 	handleError(err)
 
+	brokerIPGraphics := "54.175.85.139:8050"
+	var brokerGraphics *rpc.Client
+	brokerGraphics, err = rpc.Dial("tcp", brokerIPGraphics)
+	handleError(err)
+
 	//Make rpc call to broker
 	req := BeginGolReq{
 		World: golWorld,
@@ -94,7 +99,7 @@ func distributor(p Params, c distributorChannels) {
 
 	//Start Snapshot Graphics requests
 	wg.Add(1)
-	go Graphics(c, shutDownChan, broker, golWorld, wg)
+	go Graphics(c, shutDownChan, brokerGraphics, golWorld, wg)
 
 	wg.Wait()
 
