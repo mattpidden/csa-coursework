@@ -1,4 +1,4 @@
-- [Final Report Available Here](https://github.com/mattpidden/csa-coursework/report.pdf)
+- [Final Report Available Here](https://github.com/mattpidden/csa-coursework/blob/main/report.pdf)
 
 ## **Contents**
 - [Project Introduction](https://github.com/mattpidden/csa-coursework/tree/dev#project-introduction)
