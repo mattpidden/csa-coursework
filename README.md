@@ -1,8 +1,9 @@
+- [Final Report Available Here](https://github.com/mattpidden/csa-coursework/report.pdf)
+
 ## **Contents**
 - [Project Introduction](https://github.com/mattpidden/csa-coursework/tree/dev#project-introduction)
-- [Parallel Implementation](https://github.com/mattpidden/csa-coursework/tree/dev#parallel-implementation)
-- [Distributed Implementation](https://github.com/mattpidden/csa-coursework/tree/dev#distributed-implementation)
-- [Report](https://github.com/mattpidden/csa-coursework/tree/dev#report)
+- [Parallel Implementation Steps](https://github.com/mattpidden/csa-coursework/tree/dev#parallel-implementation)
+- [Distributed Implementation Steps](https://github.com/mattpidden/csa-coursework/tree/dev#distributed-implementation)
 - [Group Members](https://github.com/mattpidden/csa-coursework/tree/dev#group-members)
 
 ## **Project Introduction**
