@@ -127,7 +127,3 @@ func readAliveCells(path string, width, height int) []util.Cell {
 	}
 	return cells
 }
-
-
-
-

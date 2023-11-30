@@ -10,9 +10,6 @@
 *.out
 .idea/
 
-# ignores results csv file
-*.csv
-
 gameoflife
 gameoflife.test
 

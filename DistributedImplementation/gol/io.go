@@ -131,6 +131,7 @@ func startIo(p Params, c ioChannels) {
 		params:   p,
 		channels: c,
 	}
+
 	for {
 		select {
 		// Block and wait for requests from the distributor
