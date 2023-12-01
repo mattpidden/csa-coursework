@@ -50,7 +50,7 @@ type HaloExchangeResponse struct {
 type GetSnapShotRequest struct {
 }
 type GetSnapShotResponse struct {
-	matrix [][]uint8
+	Matrix [][]uint8
 }
 
 type GetSnapshotSectionRequest struct {

@@ -32,7 +32,7 @@ type BeginGolRes struct {
 type GetSnapShotRequest struct {
 }
 type GetSnapShotResponse struct {
-	matrix [][]uint8
+	Matrix [][]uint8
 }
 
 func initializeGolMatrix(p Params, c distributorChannels) [][]uint8 {
