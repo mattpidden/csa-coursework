@@ -159,8 +159,8 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 	sections := make([][][]uint8, len((*b).WorkerClients))
 	matrix := make([][]uint8, len((*b).WorkerClients))
 
+	mu := sync.Mutex{}
 	for i, client := range (*b).WorkerClients {
-
 		wg.Add(1)
 		go func(Client *rpc.Client, I int) {
 			fmt.Printf("I : %v \n", I)
@@ -168,7 +168,9 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 			res := GetSnapshotSectionResponse{}
 			err := Client.Call("Worker.GetSnapshotSection", req, &res)
 			handleError(err, "Worker.GetSnapshotSection rpc call")
+			mu.Lock()
 			sections[I] = res.Section
+			mu.Unlock()
 			wg.Done()
 		}(client, i)
 	}
