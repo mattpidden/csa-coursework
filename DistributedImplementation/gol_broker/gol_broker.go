@@ -102,7 +102,7 @@ func beginGol(servers []*rpc.Client, sectionHeight int, golWorld [][]uint8, numW
 		go func(I int, req HaloExchangeRequest, res *HaloExchangeResponse) {
 			fmt.Println("Making HaloExchange.Simulate rpc call")
 			err := servers[I].Call("Worker.Simulate", req, res)
-			handleError(err)
+			handleError(err, "Worker.Simulate")
 			fmt.Println("Worker.Simulate rpc call response received")
 			completeSections[I] = res.Section
 			wg.Done()
@@ -123,7 +123,7 @@ func initialiseWorkerConnections(IPs []string, workerClients []*rpc.Client, benc
 	var err error
 	for i, IP := range IPs {
 		workerClients[i], err = rpc.Dial("tcp", IP)
-		handleError(err)
+		handleError(err, "rpc.dial")
 	}
 
 	//Send InitialiseConnection requests to all workers
@@ -146,7 +146,7 @@ func initialiseWorkerConnections(IPs []string, workerClients []*rpc.Client, benc
 		//Make rpc call to all workers
 		fmt.Println("Worker.InitialiseConnection call made")
 		err := client.Call("Worker.InitialiseConnection", request, &response)
-		handleError(err)
+		handleError(err, "Worker.InitialiseConnection rpc call")
 		fmt.Println("Rpc response received")
 	}
 
@@ -166,7 +166,7 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 			req := GetSnapshotSectionRequest{}
 			res := GetSnapshotSectionResponse{}
 			err := Client.Call("Worker.GetSnapshotSection", req, &res)
-			handleError(err)
+			handleError(err, "Worker.GetSnapshotSection rpc call")
 			sections[I] = res.section
 			wg.Done()
 		}(client, i)
@@ -208,7 +208,7 @@ func main() {
 
 	//Register struct and its associated methods to default RPC server
 	err := rpc.Register(&broker)
-	handleError(err)
+	handleError(err, "rpc.register")
 
 	wg := sync.WaitGroup{}
 	//Start server such that broker can take rpc calls from the Local Controller
@@ -216,7 +216,7 @@ func main() {
 	go func() {
 		fmt.Printf("Main(): Listening on port %v\n", *pAddr)
 		listener1, err := net.Listen("tcp", ":"+*pAddr)
-		handleError(err)
+		handleError(err, "net.Listen ")
 		for {
 			conn, err := listener1.Accept()
 			fmt.Println("Accepted connection on port :8040")
@@ -231,8 +231,8 @@ func main() {
 	wg.Wait()
 }
 
-func handleError(err error) {
+func handleError(err error, msg string) {
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("%v : %v \n", msg, err)
 	}
 }
