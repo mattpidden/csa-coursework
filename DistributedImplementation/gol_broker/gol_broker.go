@@ -228,25 +228,6 @@ func main() {
 		wg.Done()
 	}()
 
-	wg.Add(1)
-	//Start second server for taking
-	go func() {
-		fmt.Printf("Main(): Listening on port 8050\n")
-		listener2, err := net.Listen("tcp", ":8050")
-		handleError(err)
-
-		for {
-			conn, err := listener2.Accept()
-			fmt.Println("Accepted connection on port :8050")
-
-			if err != nil {
-				fmt.Println(err)
-			}
-			go rpc.ServeConn(conn)
-		}
-		wg.Done()
-	}()
-
 	wg.Wait()
 }
 
