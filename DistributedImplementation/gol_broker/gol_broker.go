@@ -218,6 +218,7 @@ func main() {
 		listener1, err := net.Listen("tcp", ":"+*pAddr)
 		handleError(err, "net.Listen ")
 		for {
+			fmt.Println("Waiting for connections")
 			conn, err := listener1.Accept()
 			fmt.Println("Accepted connection on port :8040")
 			if err != nil {

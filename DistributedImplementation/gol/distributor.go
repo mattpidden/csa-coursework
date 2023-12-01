@@ -73,7 +73,7 @@ func distributor(p Params, c distributorChannels) {
 	//Make connection with broker
 	brokerIP := "54.175.85.139:8040"
 	broker, err := rpc.Dial("tcp", brokerIP)
-	handleError(err)
+	handleError(err, "rpc.Dial")
 
 	//Make rpc call to broker
 	req := BeginGolReq{
@@ -87,8 +87,8 @@ func distributor(p Params, c distributorChannels) {
 	wg.Add(1)
 	go func() {
 		err = broker.Call("Broker.BeginSimulation", req, &res) //Blocking rpc call
-		handleError(err)
-		shutDownChan <- true //ShutDown Graphics
+		handleError(err, "Broker.BeginSimulation rpc call")
+		//shutDownChan <- true //ShutDown Graphics
 		wg.Done()
 	}()
 
@@ -104,9 +104,6 @@ func distributor(p Params, c distributorChannels) {
 	//Clean up before next distributor call
 	fmt.Println("Beginning clean up...")
 
-	//Shutdown Graphics
-	shutDownChan <- true
-
 	//Report FinalTurnComplete
 	aliveCells := calculateAliveCells(p, makeImmutableMatrix(golWorld))
 	c.events <- FinalTurnComplete{CompletedTurns: p.Turns, Alive: aliveCells}
@@ -118,7 +115,7 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 
 	err = broker.Close()
-	handleError(err)
+	handleError(err, "broker.Close()")
 	fmt.Println("Clean up done...")
 }
 
@@ -149,7 +146,7 @@ func Graphics(c distributorChannels, shutDownChan chan bool, broker *rpc.Client,
 			res := GetSnapShotResponse{}
 			//Blocking
 			err := broker.Call("Broker.GetSnapshot", req, &res)
-			handleError(err)
+			handleError(err, "Broker.GetSnapshot rpc call")
 			//Determine what cells to flip
 			for y, row := range currentWorld {
 				for x, val := range row {
@@ -196,8 +193,8 @@ func calculateAliveCells(p Params, data func(y, x int) uint8) []util.Cell {
 	return aliveCells
 }
 
-func handleError(err error) {
+func handleError(err error, msg string) {
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("%v : %v \n", msg, err)
 	}
 }

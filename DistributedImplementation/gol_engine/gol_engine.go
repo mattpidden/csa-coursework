@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"net/rpc"
 	"os"
@@ -303,7 +304,7 @@ func makeImmutableMatrix(matrix [][]uint8) func(y, x int) uint8 {
 
 func handleError(err error) {
 	if err != nil {
-		panic(err)
+		log.Fatal()
 	}
 }
 
