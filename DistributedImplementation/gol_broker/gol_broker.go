@@ -220,6 +220,7 @@ func main() {
 		for {
 			fmt.Println("Waiting for connections")
 			conn, err := listener1.Accept()
+			fmt.Println(conn)
 			fmt.Println("Accepted connection on port :8040")
 			if err != nil {
 				fmt.Println(err)
