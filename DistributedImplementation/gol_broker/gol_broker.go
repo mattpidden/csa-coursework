@@ -72,7 +72,7 @@ func (b *Broker) BeginSimulation(req BeginGolReq, res *BeginGolRes) error {
 	sectionHeight := height / numWorkers
 
 	//Initialise connections between workers and broker, and workers and their respective neighbours
-	initialiseWorkerConnections(b.WorkerIPs, (*b).WorkerClients, benchmarking)
+	initialiseWorkerConnections(b.WorkerIPs, &(*b).WorkerClients, benchmarking)
 
 	//Begin gol computation
 	(*res).FinishedWorld = beginGol((*b).WorkerClients, sectionHeight, world, numWorkers, turns)
@@ -119,20 +119,20 @@ func beginGol(servers []*rpc.Client, sectionHeight int, golWorld [][]uint8, numW
 	return newGolWorld
 }
 
-func initialiseWorkerConnections(IPs []string, workerClients []*rpc.Client, benchmarking bool) {
+func initialiseWorkerConnections(IPs []string, workerClients *[]*rpc.Client, benchmarking bool) {
 	var err error
 	for i, IP := range IPs {
-		workerClients[i], err = rpc.Dial("tcp", IP)
+		(*workerClients)[i], err = rpc.Dial("tcp", IP)
 		handleError(err, "rpc.dial")
 	}
 
 	//Send InitialiseConnection requests to all workers
-	for i, client := range workerClients {
+	for i, client := range *workerClients {
 		uIndex := i - 1 //upper index
 		if uIndex == -1 {
-			uIndex += len(workerClients)
+			uIndex += len(*workerClients)
 		}
-		lIndex := (i + 1) % len(workerClients) //lower index
+		lIndex := (i + 1) % len(*workerClients) //lower index
 
 		request := InitialiseConnectionRequest{
 			AboveIP:      IPs[uIndex],

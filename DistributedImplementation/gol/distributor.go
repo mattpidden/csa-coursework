@@ -128,7 +128,7 @@ func distributor(p Params, c distributorChannels) {
 
 func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg *sync.WaitGroup) {
 	fmt.Println("Graphics():")
-
+	time.Sleep(1 * time.Second)
 	ticker := time.NewTicker(1 * time.Second)
 	/*conn, err := net.Dial("tcp", "54.175.85.139:8040")
 	brokerG := rpc.NewClient(conn)
