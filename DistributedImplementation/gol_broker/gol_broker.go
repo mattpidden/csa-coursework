@@ -183,7 +183,7 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 	}
 
 	//Give response the snapshot
-	res.matrix = matrix
+	res.Matrix = matrix
 	return nil
 }
 
