@@ -56,7 +56,7 @@ type GetSnapShotResponse struct {
 type GetSnapshotSectionRequest struct {
 }
 type GetSnapshotSectionResponse struct {
-	section [][]uint8
+	Section [][]uint8
 }
 
 func (b *Broker) BeginSimulation(req BeginGolReq, res *BeginGolRes) error {
@@ -167,7 +167,7 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 			res := GetSnapshotSectionResponse{}
 			err := Client.Call("Worker.GetSnapshotSection", req, &res)
 			handleError(err, "Worker.GetSnapshotSection rpc call")
-			sections[I] = res.section
+			sections[I] = res.Section
 			wg.Done()
 		}(client, i)
 	}

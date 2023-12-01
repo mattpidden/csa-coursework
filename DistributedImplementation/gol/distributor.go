@@ -75,9 +75,6 @@ func distributor(p Params, c distributorChannels) {
 	broker, err := rpc.Dial("tcp", brokerIP)
 	handleError(err, "rpc.Dial")
 
-	brokerG, err := rpc.Dial("tcp", brokerIP)
-	handleError(err, "rpc.Dial - brokerG")
-
 	//Make rpc call to broker
 	req := BeginGolReq{
 		World: golWorld,
@@ -89,15 +86,22 @@ func distributor(p Params, c distributorChannels) {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		err = broker.Call("Broker.BeginSimulation", req, &res) //Blocking rpc call
-		handleError(err, "Broker.BeginSimulation rpc call")
-		//shutDownChan <- true //ShutDown Graphics
+		call1 := &rpc.Call{
+			ServiceMethod: "Broker.BeginSimulation",
+			Args:          req,
+			Reply:         &res,
+			Done:          make(chan *rpc.Call, 1),
+		}
+		call1 = broker.Go(call1.ServiceMethod, call1.Args, call1.Reply, call1.Done) //Blocking rpc call
+		<-call1.Done
+		handleError(call1.Error, "Broker.BeginSimulation rpc call")
+		shutDownChan <- true //ShutDown Graphics
 		wg.Done()
 	}()
 
 	//Start Snapshot Graphics requests
 	wg.Add(1)
-	go Graphics(c, shutDownChan, brokerG, golWorld, wg)
+	go Graphics(c, shutDownChan, golWorld, &wg)
 
 	wg.Wait()
 
@@ -122,12 +126,15 @@ func distributor(p Params, c distributorChannels) {
 	fmt.Println("Clean up done...")
 }
 
-func Graphics(c distributorChannels, shutDownChan chan bool, broker *rpc.Client, world [][]uint8, wg sync.WaitGroup) {
+func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg *sync.WaitGroup) {
 	fmt.Println("Graphics():")
 
-	defer wg.Done()
-
 	ticker := time.NewTicker(1 * time.Second)
+	/*conn, err := net.Dial("tcp", "54.175.85.139:8040")
+	brokerG := rpc.NewClient(conn)
+	handleError(err, "rpc.Dial 2")
+
+	b
 
 	//Make copy such that no underlying slices are shared
 	currentWorld := make([][]uint8, len(world))
@@ -137,19 +144,40 @@ func Graphics(c distributorChannels, shutDownChan chan bool, broker *rpc.Client,
 	}
 
 	turn := 0
-
+	*/
+	broker, err := rpc.Dial("tcp", "54.175.85.139:8040")
+	handleError(err, "rpc.Dial")
+	req := GetSnapShotRequest{}
+	res := GetSnapShotResponse{}
+	err = broker.Call("Broker.GetSnapshot", req, &res)
+	handleError(err, "Broker.GetSnapshot")
 	for {
 		select {
 		case <-ticker.C:
 			fmt.Println("Sending GetSnapShotRequest()")
-			turn++
+			/*turn++
 
 			//send getSnapshotRequest
 			req := GetSnapShotRequest{}
 			res := GetSnapShotResponse{}
+
+			call2 := rpc.Call{
+				ServiceMethod: "Broker.GetSnapshot",
+				Args:          req,
+				Reply:         res,
+				Done:          make(chan *rpc.Call, 1),
+			}
+
 			//Blocking
-			err := broker.Call("Broker.GetSnapshot", req, &res)
-			handleError(err, "Broker.GetSnapshot rpc call")
+			brokerG.Go(call2.ServiceMethod, call2.Args, &call2.Reply, call2.Done)
+			<-call2.Done
+
+			//Needs removing
+			channel := make(chan bool)
+			<-channel
+
+			handleError(call2.Error, "Broker.GetSnapshot rpc call")
+
 			//Determine what cells to flip
 			for y, row := range currentWorld {
 				for x, val := range row {
@@ -159,10 +187,10 @@ func Graphics(c distributorChannels, shutDownChan chan bool, broker *rpc.Client,
 				}
 			}
 			c.events <- TurnComplete{CompletedTurns: turn}
-			currentWorld = res.matrix
+			currentWorld = res.matrix*/
 
 		case <-shutDownChan:
-
+			(*wg).Done()
 			return
 		}
 	}

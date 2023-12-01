@@ -47,7 +47,7 @@ type GetRowResponse struct {
 type GetSnapshotSectionRequest struct {
 }
 type GetSnapshotSectionResponse struct {
-	section [][]uint8
+	Section [][]uint8
 }
 
 type Worker struct {
@@ -80,7 +80,7 @@ type Worker struct {
 func (g *Worker) GetSnapshotSection(req GetSnapshotSectionRequest, res *GetSnapshotSectionResponse) error {
 	fmt.Println("GetSnapshotSection(): Worker.GetSnapShotSection")
 	g.sectionMutex.Lock()
-	res.section = g.section
+	res.Section = g.section
 	g.sectionMutex.Unlock()
 	return nil
 }
