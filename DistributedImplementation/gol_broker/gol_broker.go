@@ -163,6 +163,7 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 
 		wg.Add(1)
 		go func(Client *rpc.Client, I int) {
+			fmt.Printf("I : %v \n", I)
 			req := GetSnapshotSectionRequest{}
 			res := GetSnapshotSectionResponse{}
 			err := Client.Call("Worker.GetSnapshotSection", req, &res)
