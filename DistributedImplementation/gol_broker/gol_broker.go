@@ -160,6 +160,7 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 	matrix := make([][]uint8, len((*b).WorkerClients))
 
 	mu := sync.Mutex{}
+	fmt.Printf("WorkerClients: %v \n", (*b).WorkerClients)
 	for i, client := range (*b).WorkerClients {
 		wg.Add(1)
 		go func(Client *rpc.Client, I int) {
