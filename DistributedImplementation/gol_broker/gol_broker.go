@@ -225,7 +225,9 @@ func main() {
 			if err != nil {
 				fmt.Println(err)
 			}
-			go rpc.ServeConn(conn)
+			go func(Conn net.Conn) {
+				rpc.ServeConn(Conn)
+			}(conn)
 		}
 		wg.Done()
 	}()
