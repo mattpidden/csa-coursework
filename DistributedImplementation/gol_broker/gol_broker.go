@@ -169,8 +169,9 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 			res := GetSnapshotSectionResponse{}
 			fmt.Println("Making RPC call: worker.GetSnapshotSection")
 			err := Client.Call("Worker.GetSnapshotSection", req, &res)
-			fmt.Println("Worker.GetSnapshotSection received sRPC response received")
 			handleError(err, "Worker.GetSnapshotSection rpc call")
+			fmt.Println("Worker.GetSnapshotSection received RPC response received")
+
 			mu.Lock()
 			sections[I] = res.Section
 			mu.Unlock()
@@ -178,6 +179,7 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 		}(client, i)
 	}
 	wg.Wait()
+	fmt.Println("Passed Wait()")
 
 	//Put sections back together
 	for _, section := range sections {
