@@ -145,6 +145,14 @@ func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg
 
 	turn := 0
 	*/
+
+	currentWorld := make([][]uint8, len(world))
+	for y := 0; y < len(world); y++ {
+		currentWorld[0] = make([]uint8, len(world[0]))
+		copy(currentWorld[0], world[0])
+	}
+
+	turn := 0
 	broker, err := rpc.Dial("tcp", "54.175.85.139:8040")
 	handleError(err, "rpc.Dial")
 	req := GetSnapShotRequest{}
@@ -155,6 +163,22 @@ func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg
 		select {
 		case <-ticker.C:
 			fmt.Println("Sending GetSnapShotRequest()")
+
+			req := GetSnapShotRequest{}
+			res := GetSnapShotResponse{}
+			err = broker.Call("Broker.GetSnapshot", req, &res)
+			turn++
+
+			//Determine what cells to flip
+			for y, row := range currentWorld {
+				for x, val := range row {
+					if val != res.Matrix[y][x] {
+						c.events <- CellFlipped{CompletedTurns: 0, Cell: util.Cell{X: x, Y: y}}
+					}
+				}
+			}
+			c.events <- TurnComplete{CompletedTurns: turn}
+			currentWorld = res.Matrix
 			/*turn++
 
 			//send getSnapshotRequest
