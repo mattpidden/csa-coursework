@@ -82,7 +82,7 @@ type Worker struct {
 
 func (g *Worker) GetSnapshotSection(req GetSnapshotSectionRequest, res *GetSnapshotSectionResponse) error {
 	if !(*g).AllowGetSnapshot {
-		(*g).AllowGetSnapshot = <-(*g).AllowGetRowChan
+		(*g).AllowGetSnapshot = <-(*g).AllowGetSnapshotChan
 	}
 
 	fmt.Println("GetSnapshotSection(): Worker.GetSnapShotSection")
