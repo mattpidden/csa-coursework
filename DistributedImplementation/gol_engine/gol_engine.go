@@ -80,7 +80,8 @@ type Worker struct {
 func (g *Worker) GetSnapshotSection(req GetSnapshotSectionRequest, res *GetSnapshotSectionResponse) error {
 	fmt.Println("GetSnapshotSection(): Worker.GetSnapShotSection")
 	g.sectionMutex.Lock()
-	res.Section = g.section
+	res.Section = (*g).section
+	fmt.Printf("g.section: \n %v", (*g).section)
 	g.sectionMutex.Unlock()
 	return nil
 }
