@@ -76,11 +76,15 @@ type Worker struct {
 	distIP   string
 	WorkerID int
 
+	wg sync.WaitGroup
+
 	//Benchmarking
 	Benchmarking bool //If true then do not make CellsFlippedRequests back to distributor
 }
 
 func (g *Worker) GetSnapshotSection(req GetSnapshotSectionRequest, res *GetSnapshotSectionResponse) error {
+	(*g).wg.Add(1)
+	defer (*g).wg.Done()
 	if !(*g).AllowGetSnapshot {
 		(*g).AllowGetSnapshot = <-(*g).AllowGetSnapshotChan
 	}
@@ -177,21 +181,24 @@ func (g *Worker) Simulate(req HaloExchangeRequest, res *HaloExchangeResponse) er
 	fmt.Println("Simulate(): SIMULATION COMPLETE")
 	(*res).Section = (*g).section
 
-	//Clean up such that gol_engine is ready for next Simulate rpc call
-	err := (*g).above.Close()
-	handleError(err)
-	err = (*g).below.Close()
-	handleError(err)
+	defer func() {
+		//Clean up such that gol_engine is ready for next Simulate rpc call
+		err := (*g).above.Close()
+		handleError(err)
+		err = (*g).below.Close()
+		handleError(err)
+		(*g).TopSent = make(chan bool, 1)
+		(*g).BottomSent = make(chan bool, 1)
+		(*g).AllowGetRowTop = make(chan bool, 1)
+		(*g).AllowGetRowChan = make(chan bool, 1)
+		(*g).AllowGetRowBottom = make(chan bool, 1)
+		(*g).AllowGetSnapshotChan = make(chan bool, 1)
 
-	(*g).TopSent = make(chan bool, 1)
-	(*g).BottomSent = make(chan bool, 1)
-	(*g).AllowGetRowTop = make(chan bool, 1)
-	(*g).AllowGetRowChan = make(chan bool, 1)
-	(*g).AllowGetRowBottom = make(chan bool, 1)
-	(*g).AllowGetSnapshotChan = make(chan bool, 1)
+		(*g).AllowGetRow = false
+		(*g).wg.Wait() //Wait for GetSnapshotCalls to return
+		(*g).AllowGetSnapshot = false
+	}()
 
-	(*g).AllowGetSnapshot = false
-	(*g).AllowGetRow = false
 	return nil
 }
 
@@ -286,7 +293,6 @@ func determineVal(LN int, currentVal uint8, cellsFlipped *[]util.Cell, y, x int)
 	//LN : LiveNeighbours
 	if currentVal == 255 {
 		if LN < 2 {
-			//fmt.Println("Alive & LN < 2 : appending death to cellsFlipped")
 			*cellsFlipped = append(*cellsFlipped, util.Cell{X: x, Y: y})
 			return 0 //dies by under-population
 		}
@@ -294,13 +300,10 @@ func determineVal(LN int, currentVal uint8, cellsFlipped *[]util.Cell, y, x int)
 			return currentVal //unaffected
 		}
 		if LN > 3 {
-			//fmt.Println("Alive & LN > 3 : appending  death to cellsFlipped")
-
 			*cellsFlipped = append(*cellsFlipped, util.Cell{X: x, Y: y})
 			return 0 //dies by over population
 		}
 	} else if currentVal == 0 {
-		//fmt.Println("Dead & LN == 3 : appending  life to cellsFlipped")
 		if LN == 3 {
 			*cellsFlipped = append(*cellsFlipped, util.Cell{X: x, Y: y})
 
