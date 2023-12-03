@@ -65,6 +65,8 @@ func initializeGolMatrix(p Params, c distributorChannels) [][]uint8 {
 func distributor(p Params, c distributorChannels) {
 	fmt.Println("Distributor(): ")
 	var golWorld [][]uint8
+	brokerGClosed := false
+	ticker := time.NewTicker(1 * time.Second)
 
 	//Get image data from io
 	golWorld = initializeGolMatrix(p, c)
@@ -73,6 +75,9 @@ func distributor(p Params, c distributorChannels) {
 	//Make connection with broker
 	brokerIP := "54.175.85.139:8040"
 	broker, err := rpc.Dial("tcp", brokerIP)
+	handleError(err, "rpc.Dial")
+
+	brokerG, err := rpc.Dial("tcp", "54.175.85.139:8040")
 	handleError(err, "rpc.Dial")
 
 	//Make rpc call to broker
@@ -95,13 +100,19 @@ func distributor(p Params, c distributorChannels) {
 		call1 = broker.Go(call1.ServiceMethod, call1.Args, call1.Reply, call1.Done) //Blocking rpc call
 		<-call1.Done
 		handleError(call1.Error, "Broker.BeginSimulation rpc call")
+
+		//Stop snapshot ticker
+		ticker.Stop()
+		//Closing brokerG connection
+		brokerG.Close()
+		brokerGClosed = true
+		//Shutdown graphics go routine
 		shutDownChan <- true //ShutDown Graphics
 		wg.Done()
 	}()
 
 	//Start Snapshot Graphics requests
-	wg.Add(1)
-	go Graphics(c, shutDownChan, golWorld, &wg)
+	go Graphics(c, shutDownChan, golWorld, &wg, ticker, brokerG, &brokerGClosed)
 
 	wg.Wait()
 
@@ -112,6 +123,7 @@ func distributor(p Params, c distributorChannels) {
 	fmt.Println("Beginning clean up...")
 
 	//Report FinalTurnComplete
+
 	aliveCells := calculateAliveCells(p, makeImmutableMatrix(golWorld))
 	c.events <- FinalTurnComplete{CompletedTurns: p.Turns, Alive: aliveCells}
 
@@ -126,10 +138,9 @@ func distributor(p Params, c distributorChannels) {
 	fmt.Println("Clean up done...")
 }
 
-func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg *sync.WaitGroup) {
+func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg *sync.WaitGroup, ticker *time.Ticker, broker *rpc.Client, brokerGClosed *bool) {
 	fmt.Println("Graphics():")
 	time.Sleep(1 * time.Second)
-	ticker := time.NewTicker(1 * time.Second)
 
 	currentWorld := make([][]uint8, len(world))
 	for y := 0; y < len(world); y++ {
@@ -138,8 +149,6 @@ func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg
 	}
 
 	turn := 0
-	broker, err := rpc.Dial("tcp", "54.175.85.139:8040")
-	handleError(err, "rpc.Dial")
 
 	for {
 		select {
@@ -148,7 +157,12 @@ func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg
 
 			req := GetSnapShotRequest{}
 			res := GetSnapShotResponse{}
-			err = broker.Call("Broker.GetSnapshot", req, &res)
+			err := broker.Call("Broker.GetSnapshot", req, &res)
+			if err != nil && *brokerGClosed {
+				fmt.Println("Connection closed purposefully")
+			} else {
+				handleError(err, "Broker.GetSnapshot")
+			}
 			turn++
 
 			//Determine what cells to flip

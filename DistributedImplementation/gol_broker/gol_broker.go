@@ -164,9 +164,9 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 	for i, client := range (*b).WorkerClients {
 		wg.Add(1)
 		go func(Client *rpc.Client, I int) {
-			fmt.Printf("I : %v \n", I)
 			req := GetSnapshotSectionRequest{}
 			res := GetSnapshotSectionResponse{}
+
 			fmt.Println("Making RPC call: worker.GetSnapshotSection")
 			err := Client.Call("Worker.GetSnapshotSection", req, &res)
 			handleError(err, "Worker.GetSnapshotSection rpc call")

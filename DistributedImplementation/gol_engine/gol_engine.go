@@ -52,9 +52,8 @@ type GetSnapshotSectionResponse struct {
 
 type Worker struct {
 	//Clients
-	above       *rpc.Client
-	below       *rpc.Client
-	distributor *rpc.Client
+	above *rpc.Client
+	below *rpc.Client
 
 	GetRowLock        sync.Mutex
 	AllowGetRow       bool
@@ -187,6 +186,7 @@ func (g *Worker) Simulate(req HaloExchangeRequest, res *HaloExchangeResponse) er
 		handleError(err)
 		err = (*g).below.Close()
 		handleError(err)
+
 		(*g).TopSent = make(chan bool, 1)
 		(*g).BottomSent = make(chan bool, 1)
 		(*g).AllowGetRowTop = make(chan bool, 1)
