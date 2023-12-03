@@ -130,21 +130,6 @@ func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg
 	fmt.Println("Graphics():")
 	time.Sleep(1 * time.Second)
 	ticker := time.NewTicker(1 * time.Second)
-	/*conn, err := net.Dial("tcp", "54.175.85.139:8040")
-	brokerG := rpc.NewClient(conn)
-	handleError(err, "rpc.Dial 2")
-
-	b
-
-	//Make copy such that no underlying slices are shared
-	currentWorld := make([][]uint8, len(world))
-	for y := 0; y < len(world); y++ {
-		currentWorld[0] = make([]uint8, len(world[0]))
-		copy(currentWorld[0], world[0])
-	}
-
-	turn := 0
-	*/
 
 	currentWorld := make([][]uint8, len(world))
 	for y := 0; y < len(world); y++ {
@@ -155,10 +140,7 @@ func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg
 	turn := 0
 	broker, err := rpc.Dial("tcp", "54.175.85.139:8040")
 	handleError(err, "rpc.Dial")
-	req := GetSnapShotRequest{}
-	res := GetSnapShotResponse{}
-	err = broker.Call("Broker.GetSnapshot", req, &res)
-	handleError(err, "Broker.GetSnapshot")
+
 	for {
 		select {
 		case <-ticker.C:
@@ -179,39 +161,11 @@ func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg
 			}
 			c.events <- TurnComplete{CompletedTurns: turn}
 			currentWorld = res.Matrix
-			/*turn++
+			fmt.Printf("height: %v, width: %v", len(res.Matrix), len(res.Matrix[0]))
 
-			//send getSnapshotRequest
-			req := GetSnapShotRequest{}
-			res := GetSnapShotResponse{}
-
-			call2 := rpc.Call{
-				ServiceMethod: "Broker.GetSnapshot",
-				Args:          req,
-				Reply:         res,
-				Done:          make(chan *rpc.Call, 1),
+			for y := 0; y < len(currentWorld); y++ {
+				copy(currentWorld[y], res.Matrix[y])
 			}
-
-			//Blocking
-			brokerG.Go(call2.ServiceMethod, call2.Args, &call2.Reply, call2.Done)
-			<-call2.Done
-
-			//Needs removing
-			channel := make(chan bool)
-			<-channel
-
-			handleError(call2.Error, "Broker.GetSnapshot rpc call")
-
-			//Determine what cells to flip
-			for y, row := range currentWorld {
-				for x, val := range row {
-					if val != res.matrix[y][x] {
-						c.events <- CellFlipped{CompletedTurns: 0, Cell: util.Cell{X: x, Y: y}}
-					}
-				}
-			}
-			c.events <- TurnComplete{CompletedTurns: turn}
-			currentWorld = res.matrix*/
 
 		case <-shutDownChan:
 			(*wg).Done()

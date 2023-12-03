@@ -187,8 +187,6 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 		matrix = append(matrix, section...)
 	}
 
-	fmt.Println(matrix)
-
 	//Give response the snapshot
 	res.Matrix = matrix
 	return nil
