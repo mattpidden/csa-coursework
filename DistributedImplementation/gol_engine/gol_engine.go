@@ -64,6 +64,9 @@ type Worker struct {
 	AllowGetRowTop    chan bool
 	AllowGetRowBottom chan bool
 
+	AllowGetSnapshot     bool
+	AllowGetSnapshotChan chan bool
+
 	//Section to simulate gol upon
 	sectionMutex sync.Mutex
 	section      [][]uint8
@@ -78,10 +81,13 @@ type Worker struct {
 }
 
 func (g *Worker) GetSnapshotSection(req GetSnapshotSectionRequest, res *GetSnapshotSectionResponse) error {
+	if !(*g).AllowGetSnapshot {
+		(*g).AllowGetSnapshot = <-(*g).AllowGetRowChan
+	}
+
 	fmt.Println("GetSnapshotSection(): Worker.GetSnapShotSection")
 	g.sectionMutex.Lock()
 	res.Section = (*g).section
-	fmt.Printf("g.section: \n %v", (*g).section)
 	g.sectionMutex.Unlock()
 	return nil
 }
@@ -95,6 +101,9 @@ func (g *Worker) Simulate(req HaloExchangeRequest, res *HaloExchangeResponse) er
 	(*g).AllowGetRowChan <- true
 	(*g).AllowGetRowTop <- true
 	(*g).AllowGetRowBottom <- true
+
+	//Allow GetSnapshotSection() calls to complete
+	(*g).AllowGetSnapshotChan <- true
 
 	//Initialise new 2d matrix
 	sourceMatrix := make([][]uint8, len((*g).section)+2)
@@ -179,6 +188,10 @@ func (g *Worker) Simulate(req HaloExchangeRequest, res *HaloExchangeResponse) er
 	(*g).AllowGetRowTop = make(chan bool, 1)
 	(*g).AllowGetRowChan = make(chan bool, 1)
 	(*g).AllowGetRowBottom = make(chan bool, 1)
+	(*g).AllowGetSnapshotChan = make(chan bool, 1)
+
+	(*g).AllowGetSnapshot = false
+	(*g).AllowGetRow = false
 	return nil
 }
 
@@ -315,11 +328,12 @@ func main() {
 	fmt.Printf("Main(): Listening on port %v\n", *pAddr)
 
 	g := Worker{
-		TopSent:           make(chan bool, 1),
-		BottomSent:        make(chan bool, 1),
-		AllowGetRowChan:   make(chan bool, 1),
-		AllowGetRowTop:    make(chan bool, 1),
-		AllowGetRowBottom: make(chan bool, 1),
+		TopSent:              make(chan bool, 1),
+		BottomSent:           make(chan bool, 1),
+		AllowGetRowChan:      make(chan bool, 1),
+		AllowGetRowTop:       make(chan bool, 1),
+		AllowGetRowBottom:    make(chan bool, 1),
+		AllowGetSnapshotChan: make(chan bool, 1),
 	}
 	err := rpc.Register(&g)
 	handleError(err)

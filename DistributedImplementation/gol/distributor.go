@@ -161,7 +161,6 @@ func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg
 			}
 			c.events <- TurnComplete{CompletedTurns: turn}
 			currentWorld = res.Matrix
-			fmt.Printf("height: %v, width: %v", len(res.Matrix), len(res.Matrix[0]))
 
 			for y := 0; y < len(currentWorld); y++ {
 				copy(currentWorld[y], res.Matrix[y])
