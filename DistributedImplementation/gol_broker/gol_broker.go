@@ -157,7 +157,8 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 	//Make GetSnapshotSectionReq to all workers
 	wg := sync.WaitGroup{}
 	sections := make([][][]uint8, len((*b).WorkerClients))
-	matrix := make([][]uint8, len((*b).WorkerClients))
+	//matrix := make([][]uint8, len((*b).WorkerClients))
+	var matrix [][]uint8
 
 	mu := sync.Mutex{}
 	fmt.Printf("WorkerClients: %v \n", (*b).WorkerClients)
