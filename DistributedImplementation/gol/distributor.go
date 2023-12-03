@@ -104,16 +104,16 @@ func distributor(p Params, c distributorChannels) {
 		//Stop snapshot ticker
 		ticker.Stop()
 		//Closing brokerG connection
-		brokerG.Close()
 		brokerGClosed = true
+		brokerG.Close()
 		//Shutdown graphics go routine
 		shutDownChan <- true //ShutDown Graphics
 		wg.Done()
 	}()
 
 	//Start Snapshot Graphics requests
+	wg.Add(1)
 	go Graphics(c, shutDownChan, golWorld, &wg, ticker, brokerG, &brokerGClosed)
-
 	wg.Wait()
 
 	//Get finished world
@@ -160,6 +160,7 @@ func Graphics(c distributorChannels, shutDownChan chan bool, world [][]uint8, wg
 			err := broker.Call("Broker.GetSnapshot", req, &res)
 			if err != nil && *brokerGClosed {
 				fmt.Println("Connection closed purposefully")
+				continue
 			} else {
 				handleError(err, "Broker.GetSnapshot")
 			}
@@ -215,6 +216,7 @@ func calculateAliveCells(p Params, data func(y, x int) uint8) []util.Cell {
 	return aliveCells
 }
 
+//Utility methods
 func handleError(err error, msg string) {
 	if err != nil {
 		log.Fatalf("%v : %v \n", msg, err)
