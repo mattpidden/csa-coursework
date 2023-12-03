@@ -32,17 +32,14 @@ type InitialiseConnectionRequest struct {
 	Benchmarking bool
 }
 
-// InitialiseConnectionResponse HALO-EXCHANGE
 type InitialiseConnectionResponse struct {
 }
 
-// HaloExchangeRequest HALO-EXCHANGE
 type HaloExchangeRequest struct {
 	Section [][]uint8
 	Turns   int
 }
 
-// HaloExchangeResponse HALO-EXCHANGE
 type HaloExchangeResponse struct {
 	Section [][]uint8
 }
@@ -87,19 +84,22 @@ func beginGol(servers []*rpc.Client, sectionHeight int, golWorld [][]uint8, numW
 	fmt.Println("beginGol():")
 	wg := sync.WaitGroup{}
 	y := 0
-	var newGolWorld [][]uint8
 
+	var newGolWorld [][]uint8
 	completeSections := make([][][]uint8, numWorkers)
+
 	for i := 0; i < len(servers); i++ {
 		section := make([][]uint8, sectionHeight)
 		copy(section, (golWorld)[y:y+sectionHeight]) //Shallow copy
 		y += sectionHeight
 
+		//Each worker is sent their section within the request
 		request := HaloExchangeRequest{Section: section, Turns: turns}
 		response := new(HaloExchangeResponse)
 
 		wg.Add(1)
 		go func(I int, req HaloExchangeRequest, res *HaloExchangeResponse) {
+			//Make rpc call to worker
 			fmt.Println("Making HaloExchange.Simulate rpc call")
 			err := servers[I].Call("Worker.Simulate", req, res)
 			handleError(err, "Worker.Simulate")
@@ -116,6 +116,7 @@ func beginGol(servers []*rpc.Client, sectionHeight int, golWorld [][]uint8, numW
 		newGolWorld = append(newGolWorld, section...)
 	}
 
+	//Return complete matrix
 	return newGolWorld
 }
 
@@ -157,11 +158,9 @@ func (b *Broker) GetSnapshot(req GetSnapShotRequest, res *GetSnapShotResponse) e
 	//Make GetSnapshotSectionReq to all workers
 	wg := sync.WaitGroup{}
 	sections := make([][][]uint8, len((*b).WorkerClients))
-	//matrix := make([][]uint8, len((*b).WorkerClients))
 	var matrix [][]uint8
 
 	mu := sync.Mutex{}
-	fmt.Printf("WorkerClients: %v \n", (*b).WorkerClients)
 	for i, client := range (*b).WorkerClients {
 		wg.Add(1)
 		go func(Client *rpc.Client, I int) {
@@ -199,20 +198,13 @@ func main() {
 	workerIPs := make([]string, numWorkers)
 	workerClients := make([]*rpc.Client, numWorkers)
 
-	/*
-		workerIPs[0] = "100.24.91.201:8040"
-		workerIPs[1] = "3.225.79.228:8040"
-		workerIPs[2] = "52.54.247.23:8040"
-		workerIPs[3] = "54.86.16.188:8040"
-	*/
-
 	//Private IP addresses - Since workers communicate between themselves on AWS
 	workerIPs[0] = "172.31.34.110:8040"
 	workerIPs[1] = "172.31.44.175:8040"
 	workerIPs[2] = "172.31.42.1:8040"
 	workerIPs[3] = "172.31.35.38:8040"
 
-	//Define struct
+	//Define struct to be registered
 	broker := Broker{WorkerIPs: workerIPs, WorkerClients: workerClients}
 
 	//Register struct and its associated methods to default RPC server
